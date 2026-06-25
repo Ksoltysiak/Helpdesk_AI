@@ -1,0 +1,12 @@
+services:
+  helpdesk:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - helpdesk-data:/app/data
+    environment:
+      - DB_PATH=/app/data/helpdesk.db
+
+volumes:
+  helpdesk-data:

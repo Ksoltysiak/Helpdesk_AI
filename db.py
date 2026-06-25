@@ -2,7 +2,7 @@ import sqlite3
 import os
 from flask import g
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "helpdesk.db")
+DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "helpdesk.db"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
