@@ -1,9 +1,9 @@
 # Inteligentny HelpDesk IT
 
-Back-end systemu HelpDesk dla MŚP: REST API w technologii **Flask + SQLite**.
-Obsługuje pełny cykl życia zgłoszenia IT, kontrolę dostępu opartą na rolach
-(RBAC), automatyczną kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę
-audytu.
+Back-end + front-end systemu HelpDesk dla MŚP: REST API w technologii
+**Flask + SQLite** z interfejsem użytkownika HTML/CSS/JS. Obsługuje pełny cykl
+życia zgłoszenia IT, kontrolę dostępu opartą na rolach (RBAC), automatyczną
+kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 
 ---
 
@@ -13,6 +13,7 @@ audytu.
 - [Szybki start (Docker)](#szybki-start-docker)
 - [Szybki start (lokalnie, bez Dockera)](#szybki-start-lokalnie-bez-dockera)
 - [Weryfikacja działania](#weryfikacja-działania)
+- [Bezpieczeństwo](#bezpieczeństwo)
 - [Role użytkowników](#role-użytkowników)
 - [Punkty końcowe API](#punkty-końcowe-api)
 - [Cykl życia zgłoszenia](#cykl-życia-zgłoszenia-dozwolone-przejścia-statusów)
@@ -24,17 +25,20 @@ audytu.
 
 ## Struktura plików
 
-| Plik                 | Odpowiada za                                          |
-|-----------------------|--------------------------------------------------------|
-| `app.py`              | Punkt startowy aplikacji, konfiguracja, CORS            |
-| `db.py`               | Schemat bazy danych, połączenie, zapis audytu           |
-| `auth.py`             | Kontrola dostępu według ról (RBAC)                      |
-| `ai.py`               | Automatyczna kategoryzacja zgłoszeń                     |
-| `routes.py`           | Wszystkie punkty końcowe API                            |
-| `seed.py`             | Wypełnienie bazy danymi testowymi                       |
-| `demo.py`             | Skrypt sprawdzający — uruchamia i weryfikuje całe API   |
-| `Dockerfile`          | Obraz kontenera dla back-endu                           |
-| `docker-compose.yml`  | Uruchomienie usługi wraz z trwałym wolumenem danych     |
+| Plik                 | Odpowiada za                                              |
+|-----------------------|------------------------------------------------------------|
+| `app.py`              | Punkt startowy, nagłówki bezpieczeństwa, serwowanie frontendu |
+| `db.py`               | Schemat bazy danych, połączenie, zapis audytu              |
+| `auth.py`             | JWT, generowanie/weryfikacja tokenów, dekoratory RBAC      |
+| `rate_limit.py`       | Instancja Flask-Limiter (ograniczanie żądań)               |
+| `ai.py`               | Automatyczna kategoryzacja zgłoszeń                        |
+| `routes.py`           | Wszystkie punkty końcowe API                               |
+| `seed.py`             | Wypełnienie bazy danymi testowymi (hasła hashowane)        |
+| `demo.py`             | Skrypt sprawdzający — weryfikuje całe API                  |
+| `Dockerfile`          | Obraz kontenera, uruchomienie jako użytkownik bez uprawnień root |
+| `docker-compose.yml`  | Uruchomienie usługi z trwałym wolumenem i wymaganym SECRET_KEY |
+| `.env.example`        | Szablon zmiennych środowiskowych                           |
+| `frontend/`           | Interfejs użytkownika (HTML + CSS + JS)                    |
 
 ---
 
@@ -42,13 +46,28 @@ audytu.
 
 Wymaga zainstalowanego **Docker** / **Docker Desktop**.
 
+**1. Skonfiguruj zmienne środowiskowe:**
+
+```bash
+cp .env.example .env
+# Ustaw SECRET_KEY w pliku .env na długi, losowy ciąg znaków
+```
+
+**2. Uruchom:**
+
 ```bash
 docker compose up --build
 ```
 
-API będzie dostępne pod `http://localhost:5000`. Baza danych SQLite jest
-inicjalizowana automatycznie przy pierwszym starcie i przechowywana w trwałym
-wolumenie `helpdesk-data`, więc dane przetrwają restart kontenera.
+**3. Wypełnij bazę danych:**
+
+```bash
+docker compose exec helpdesk python seed.py
+```
+
+Aplikacja będzie dostępna pod `http://localhost:5000`. Baza danych SQLite jest
+przechowywana w trwałym wolumenie `helpdesk-data` — dane przetrwają restart
+kontenera.
 
 Zatrzymanie:
 
@@ -63,41 +82,56 @@ docker compose down
 Wymagany **Python 3.8+**.
 
 ```bash
+cp .env.example .env          # ustaw SECRET_KEY
 py -m pip install -r requirements.txt
-py seed.py      # tworzy i wypełnia bazę danymi testowymi
-py app.py       # startuje serwer na http://127.0.0.1:5000
+py seed.py                    # tworzy i wypełnia bazę danymi testowymi
+py app.py                     # startuje serwer na http://127.0.0.1:5000
 ```
-
-Pierwszy terminal z serwerem musi zostać otwarty — w drugim terminalu można
-odpytywać API lub uruchomić skrypt weryfikujący.
 
 ---
 
 ## Weryfikacja działania
 
-Gdy serwer działa (lokalnie lub w Dockerze), w drugim terminalu:
+Gdy serwer działa, skrypt `demo.py` sprawdza wszystkie operacje API:
 
 ```bash
 py demo.py
 ```
 
-Skrypt wykonuje po kolei wszystkie operacje back-endu (logowanie, kategoryzacja
-AI, zmiana statusów, audyt, kontrola uprawnień) i na końcu wypisuje
-podsumowanie, np.:
-
-```
-WYNIK: 17 testow OK, 0 bledow
-```
-
-Ręczne sprawdzenie pojedynczych endpointów:
+Ręczne sprawdzenie endpointów (wymaga najpierw zalogowania się i pobrania tokenu):
 
 ```bash
-curl http://localhost:5000/api/dashboard -H "X-User-Id: 4"
+# Zaloguj się i zapisz token
+TOKEN=$(curl -s -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"m.lewandowski","password":"tech123"}' \
+  | python -c "import json,sys; print(json.load(sys.stdin)['token'])")
 
-curl -X POST http://localhost:5000/api/ai/categorize \
-  -H "Content-Type: application/json" -H "X-User-Id: 1" \
-  -d "{\"title\":\"phishing\",\"description\":\"podejrzany mail z prosba o haslo\"}"
+# Użyj tokenu w nagłówku Authorization
+curl http://localhost:5000/api/dashboard \
+  -H "Authorization: Bearer $TOKEN"
 ```
+
+---
+
+## Bezpieczeństwo
+
+| Mechanizm | Implementacja |
+|-----------|---------------|
+| Hashowanie haseł | `werkzeug` scrypt — brak plaintext w bazie |
+| Uwierzytelnianie | JWT (HS256, ważność 8h) — podpisane tokeny, nie do podrobienia |
+| Ograniczanie żądań | Flask-Limiter: 10 prób/min, 30/h na endpoincie logowania |
+| Nagłówki HTTP | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Content-Security-Policy` |
+| CORS | Brak — frontend serwowany z tego samego serwera (same-origin) |
+| Docker | Proces gunicorn działa jako systemowy użytkownik bez uprawnień root |
+| Walidacja wejścia | Limity długości: tytuł ≤ 200, opis ≤ 5000, notatka ≤ 2000 znaków |
+| Klucz tajny | `SECRET_KEY` wymagany jako zmienna środowiskowa — compose odmawia startu bez niego |
+
+**Wymaganie produkcyjne:** wygeneruj `SECRET_KEY` poleceniem:
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+i ustaw go jako zmienną środowiskową przed uruchomieniem.
 
 ---
 
@@ -106,7 +140,7 @@ curl -X POST http://localhost:5000/api/ai/categorize \
 | Rola        | Uprawnienia                                                           |
 |-------------|------------------------------------------------------------------------|
 | `pracownik` | Tworzenie zgłoszeń, podgląd **wyłącznie własnych** zgłoszeń            |
-| `technik`   | Podgląd wszystkich zgłoszeń, zmiana statusu/kategorii, notatki, audyt   |
+| `technik`   | Podgląd wszystkich zgłoszeń, zmiana statusu/kategorii, notatki, audyt  |
 | `admin`     | Pełny dostęp                                                           |
 
 ---
@@ -115,7 +149,7 @@ curl -X POST http://localhost:5000/api/ai/categorize \
 
 | Metoda | Ścieżka                   | Rola          | Opis                                      |
 |--------|----------------------------|---------------|---------------------------------------------|
-| POST   | `/api/auth/login`          | —             | Logowanie                                   |
+| POST   | `/api/auth/login`          | —             | Logowanie — zwraca JWT token                |
 | GET    | `/api/dashboard`           | każdy         | Statystyki + rozkład kategorii              |
 | GET    | `/api/tickets`             | każdy         | Lista zgłoszeń (filtrowana wg roli)         |
 | POST   | `/api/tickets`             | pracownik     | Nowe zgłoszenie + kategoryzacja AI          |
@@ -125,8 +159,11 @@ curl -X POST http://localhost:5000/api/ai/categorize \
 | GET    | `/api/tickets/{id}/audit`  | technik/admin | Pełna ścieżka audytu                        |
 | POST   | `/api/ai/categorize`       | każdy         | Test modułu AI na dowolnym tekście          |
 
-**Autoryzacja:** po zalogowaniu każde zapytanie wymaga nagłówka
-`X-User-Id: <id>` (np. `1` = pracownik, `4` = technik).
+**Autoryzacja:** każde żądanie (poza logowaniem) wymaga nagłówka:
+```
+Authorization: Bearer <token>
+```
+Token jest zwracany przez endpoint `/api/auth/login`.
 
 **Filtry dla `GET /api/tickets`** (tylko technik/admin):
 `?status=Nowe`, `?priority=Krytyczny`, `?category=Siec`.
@@ -140,7 +177,8 @@ Nowe → W trakcie → Rozwiazane → Zamkniete
               ↘ Wstrzymane ↗
 ```
 
-Próba przeskoczenia etapu (np. `Nowe → Zamkniete`) jest odrzucana przez API.
+Próba przeskoczenia etapu (np. `Nowe → Zamkniete`) jest odrzucana przez API
+z kodem 400 i listą dozwolonych przejść.
 
 ---
 
@@ -157,23 +195,27 @@ kosztów); w pliku `ai.py` opisano, jak podłączyć prawdziwy model językowy
 
 ## Dane testowe (logowanie)
 
-| Login          | Hasło    | Rola      | ID |
-|-----------------|----------|-----------|----|
-| k.nowak         | haslo123 | pracownik | 1  |
-| p.wisniewski    | haslo123 | pracownik | 2  |
-| a.kowalczyk     | haslo123 | pracownik | 3  |
-| m.lewandowski   | tech123  | technik   | 4  |
-| j.zielinska     | tech123  | technik   | 5  |
-| admin           | admin123 | admin     | 6  |
+Dostępne po uruchomieniu `seed.py`. Hasła są hashowane — poniżej podane są
+oryginalne wartości do zalogowania się przez interfejs.
+
+| Login          | Hasło    | Rola      |
+|-----------------|----------|-----------|
+| k.nowak         | haslo123 | pracownik |
+| p.wisniewski    | haslo123 | pracownik |
+| a.kowalczyk     | haslo123 | pracownik |
+| m.lewandowski   | tech123  | technik   |
+| j.zielinska     | tech123  | technik   |
+| admin           | admin123 | admin     |
 
 ---
 
 ## Rozwiązywanie problemów
 
-| Komunikat                              | Rozwiązanie                                             |
-|------------------------------------------|------------------------------------------------------------|
-| `'py' nie jest rozpoznawane...`          | Zainstaluj Pythona z python.org, zaznacz „Add to PATH”     |
-| `No module named pip`                    | Wpisz `py -m ensurepip --upgrade`                          |
-| `No module named flask`                  | Wpisz `py -m pip install -r requirements.txt`              |
-| `Address already in use` / port zajęty   | Zamknij poprzedni serwer (Ctrl+C w jego terminalu)         |
-| Serwer nie odpowiada przy `demo.py`      | Najpierw uruchom serwer (`py app.py` lub `docker compose up`) |
+| Komunikat                                        | Rozwiązanie                                                  |
+|---------------------------------------------------|--------------------------------------------------------------|
+| `required variable SECRET_KEY is missing`        | Skopiuj `.env.example` do `.env` i ustaw `SECRET_KEY`        |
+| `'py' nie jest rozpoznawane...`                  | Zainstaluj Pythona z python.org, zaznacz „Add to PATH"       |
+| `No module named flask`                          | Wpisz `py -m pip install -r requirements.txt`                |
+| `Address already in use` / port zajęty           | Zamknij poprzedni serwer (Ctrl+C w jego terminalu)           |
+| `401 Wymagana autoryzacja`                       | Token wygasł lub nie podano — zaloguj się ponownie           |
+| `429 Too Many Requests`                          | Zbyt wiele prób logowania — odczekaj minutę                  |
