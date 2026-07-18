@@ -1,49 +1,65 @@
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime, timedelta
+from werkzeug.security import check_password_hash
 import json
 from db import get_db, log_audit
-from auth import login_required, roles_required
+from auth import login_required, roles_required, generate_token
 from ai import categorize, CATEGORIES, SLA_HOURS
+from rate_limit import limiter
 
 api = Blueprint("api", __name__)
 
 TRANSITIONS = {
-    "Nowe": ["W trakcie"],
-    "W trakcie": ["Rozwiazane", "Wstrzymane"],
+    "Nowe":       ["W trakcie"],
+    "W trakcie":  ["Rozwiazane", "Wstrzymane"],
     "Wstrzymane": ["W trakcie"],
     "Rozwiazane": ["Zamkniete", "W trakcie"],
-    "Zamkniete": [],
+    "Zamkniete":  [],
 }
+
+_TITLE_MAX    = 200
+_DESC_MAX     = 5000
+_NOTE_MAX     = 2000
+_CATEGORY_MAX = 50
 
 
 def serialize(t):
     return {
-        "id": t["id"],
-        "title": t["title"],
-        "description": t["description"],
-        "category": t["category"],
-        "priority": t["priority"],
-        "status": t["status"],
-        "created_by": t["created_by"],
-        "assigned_to": t["assigned_to"],
+        "id":            t["id"],
+        "title":         t["title"],
+        "description":   t["description"],
+        "category":      t["category"],
+        "priority":      t["priority"],
+        "status":        t["status"],
+        "created_by":    t["created_by"],
+        "assigned_to":   t["assigned_to"],
         "ai_categorized": bool(t["ai_categorized"]),
-        "sla_deadline": t["sla_deadline"],
-        "created_at": t["created_at"],
-        "updated_at": t["updated_at"],
-        "closed_at": t["closed_at"],
+        "sla_deadline":  t["sla_deadline"],
+        "created_at":    t["created_at"],
+        "updated_at":    t["updated_at"],
+        "closed_at":     t["closed_at"],
     }
 
 
 @api.route("/auth/login", methods=["POST"])
+@limiter.limit("10 per minute; 30 per hour")
 def login():
-    data = request.get_json(silent=True) or {}
-    user = get_db().execute(
-        "SELECT * FROM users WHERE username = ? AND password = ?",
-        (data.get("username"), data.get("password")),
-    ).fetchone()
-    if not user:
+    data     = request.get_json(silent=True) or {}
+    username = data.get("username", "")
+    password = data.get("password", "")
+
+    if not isinstance(username, str) or not isinstance(password, str):
         return jsonify({"error": "Nieprawidlowy login lub haslo"}), 401
-    return jsonify({"id": user["id"], "name": user["name"], "role": user["role"]})
+
+    user = get_db().execute(
+        "SELECT * FROM users WHERE username = ?", (username,)
+    ).fetchone()
+
+    if not user or not check_password_hash(user["password"], password):
+        return jsonify({"error": "Nieprawidlowy login lub haslo"}), 401
+
+    token = generate_token(user["id"])
+    return jsonify({"id": user["id"], "name": user["name"], "role": user["role"], "token": token})
 
 
 @api.route("/dashboard", methods=["GET"])
@@ -51,16 +67,16 @@ def login():
 def dashboard():
     db = get_db()
     stats = {
-        "otwarte": db.execute("SELECT COUNT(*) c FROM tickets WHERE status != 'Zamkniete'").fetchone()["c"],
+        "otwarte":   db.execute("SELECT COUNT(*) c FROM tickets WHERE status != 'Zamkniete'").fetchone()["c"],
         "w_trakcie": db.execute("SELECT COUNT(*) c FROM tickets WHERE status = 'W trakcie'").fetchone()["c"],
-        "rozwiazane": db.execute("SELECT COUNT(*) c FROM tickets WHERE status = 'Rozwiazane'").fetchone()["c"],
+        "rozwiazane":db.execute("SELECT COUNT(*) c FROM tickets WHERE status = 'Rozwiazane'").fetchone()["c"],
         "krytyczne": db.execute("SELECT COUNT(*) c FROM tickets WHERE priority = 'Krytyczny' AND status != 'Zamkniete'").fetchone()["c"],
     }
     rows = db.execute(
         "SELECT category, COUNT(*) c FROM tickets WHERE category IS NOT NULL GROUP BY category ORDER BY c DESC"
     ).fetchall()
     return jsonify({
-        "statystyki": stats,
+        "statystyki":   stats,
         "wg_kategorii": [{"kategoria": r["category"], "liczba": r["c"]} for r in rows],
     })
 
@@ -68,7 +84,7 @@ def dashboard():
 @api.route("/tickets", methods=["GET"])
 @login_required
 def list_tickets():
-    db = get_db()
+    db   = get_db()
     user = g.user
 
     if user["role"] == "pracownik":
@@ -76,15 +92,15 @@ def list_tickets():
             "SELECT * FROM tickets WHERE created_by = ? ORDER BY id DESC", (user["id"],)
         ).fetchall()
     else:
-        query = "SELECT * FROM tickets WHERE 1=1"
+        query  = "SELECT * FROM tickets WHERE 1=1"
         params = []
         for field in ("status", "priority", "category"):
             value = request.args.get(field)
             if value:
-                query += f" AND {field} = ?"
+                query  += f" AND {field} = ?"
                 params.append(value)
         query += " ORDER BY id DESC"
-        rows = db.execute(query, params).fetchall()
+        rows   = db.execute(query, params).fetchall()
 
     return jsonify({"total": len(rows), "tickets": [serialize(t) for t in rows]})
 
@@ -92,18 +108,24 @@ def list_tickets():
 @api.route("/tickets", methods=["POST"])
 @roles_required("pracownik")
 def create_ticket():
-    data = request.get_json(silent=True) or {}
-    title, description = data.get("title"), data.get("description")
+    data        = request.get_json(silent=True) or {}
+    title       = data.get("title", "")
+    description = data.get("description", "")
+
     if not title or not description:
         return jsonify({"error": "Wymagane pola: title, description"}), 400
+    if len(title) > _TITLE_MAX:
+        return jsonify({"error": f"Tytul za dlugi (max {_TITLE_MAX} znakow)"}), 400
+    if len(description) > _DESC_MAX:
+        return jsonify({"error": f"Opis za dlugi (max {_DESC_MAX} znakow)"}), 400
 
-    db = get_db()
+    db        = get_db()
     ticket_id = db.execute(
         "INSERT INTO tickets (title, description, created_by) VALUES (?,?,?)",
         (title, description, g.user["id"]),
     ).lastrowid
 
-    result = categorize(title, description)
+    result   = categorize(title, description)
     deadline = (datetime.now() + timedelta(hours=SLA_HOURS[result["priorytet"]])).isoformat(timespec="seconds")
     db.execute(
         "UPDATE tickets SET category=?, priority=?, ai_categorized=1, sla_deadline=?, updated_at=datetime('now') WHERE id=?",
@@ -120,7 +142,7 @@ def create_ticket():
 @login_required
 def get_ticket(ticket_id):
     db = get_db()
-    t = db.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+    t  = db.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
     if not t:
         return jsonify({"error": "Nie znaleziono zgloszenia"}), 404
     if g.user["role"] == "pracownik" and t["created_by"] != g.user["id"]:
@@ -131,7 +153,7 @@ def get_ticket(ticket_id):
         note_query += " AND n.internal = 0"
     notes = db.execute(note_query + " ORDER BY n.id", (ticket_id,)).fetchall()
 
-    data = serialize(t)
+    data         = serialize(t)
     data["notes"] = [
         {"author": n["author"], "content": n["content"], "internal": bool(n["internal"]), "created_at": n["created_at"]}
         for n in notes
@@ -143,8 +165,8 @@ def get_ticket(ticket_id):
 @roles_required("technik", "admin")
 def update_ticket(ticket_id):
     data = request.get_json(silent=True) or {}
-    db = get_db()
-    t = db.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+    db   = get_db()
+    t    = db.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
     if not t:
         return jsonify({"error": "Nie znaleziono zgloszenia"}), 404
 
@@ -152,14 +174,14 @@ def update_ticket(ticket_id):
 
     if "status" in data:
         new_status = data["status"]
-        allowed = TRANSITIONS.get(t["status"], [])
+        allowed    = TRANSITIONS.get(t["status"], [])
         if new_status not in allowed:
             return jsonify({
-                "error": f"Niedozwolona zmiana statusu: {t['status']} -> {new_status}",
+                "error":    f"Niedozwolona zmiana statusu: {t['status']} -> {new_status}",
                 "dozwolone": allowed,
             }), 400
 
-        sql = "UPDATE tickets SET status = ?, updated_at = datetime('now')"
+        sql    = "UPDATE tickets SET status = ?, updated_at = datetime('now')"
         params = [new_status]
         if t["status"] == "Nowe" and not t["assigned_to"]:
             sql += ", assigned_to = ?"
@@ -173,15 +195,25 @@ def update_ticket(ticket_id):
         changed.append("status")
 
     if "category" in data:
-        if data["category"] not in CATEGORIES:
+        cat = data["category"]
+        if not isinstance(cat, str) or cat not in CATEGORIES:
             return jsonify({"error": "Nieprawidlowa kategoria", "dozwolone": CATEGORIES}), 400
-        db.execute("UPDATE tickets SET category = ?, updated_at = datetime('now') WHERE id = ?", (data["category"], ticket_id))
-        log_audit(db, ticket_id, g.user["id"], "Zmiana kategorii", t["category"], data["category"])
+        db.execute(
+            "UPDATE tickets SET category = ?, updated_at = datetime('now') WHERE id = ?",
+            (cat, ticket_id),
+        )
+        log_audit(db, ticket_id, g.user["id"], "Zmiana kategorii", t["category"], cat)
         changed.append("category")
 
     if "assigned_to" in data:
-        db.execute("UPDATE tickets SET assigned_to = ?, updated_at = datetime('now') WHERE id = ?", (data["assigned_to"], ticket_id))
-        log_audit(db, ticket_id, g.user["id"], "Przypisanie", str(t["assigned_to"]), str(data["assigned_to"]))
+        assignee = data["assigned_to"]
+        if not isinstance(assignee, int):
+            return jsonify({"error": "assigned_to musi byc liczba calkowita"}), 400
+        db.execute(
+            "UPDATE tickets SET assigned_to = ?, updated_at = datetime('now') WHERE id = ?",
+            (assignee, ticket_id),
+        )
+        log_audit(db, ticket_id, g.user["id"], "Przypisanie", str(t["assigned_to"]), str(assignee))
         changed.append("assigned_to")
 
     if not changed:
@@ -194,10 +226,13 @@ def update_ticket(ticket_id):
 @api.route("/tickets/<int:ticket_id>/notes", methods=["POST"])
 @roles_required("technik", "admin")
 def add_note(ticket_id):
-    data = request.get_json(silent=True) or {}
-    content = data.get("content")
+    data    = request.get_json(silent=True) or {}
+    content = data.get("content", "")
+
     if not content:
         return jsonify({"error": "Wymagane pole: content"}), 400
+    if len(content) > _NOTE_MAX:
+        return jsonify({"error": f"Notatka za dluga (max {_NOTE_MAX} znakow)"}), 400
 
     db = get_db()
     if not db.execute("SELECT 1 FROM tickets WHERE id = ?", (ticket_id,)).fetchone():
@@ -230,8 +265,9 @@ def ticket_audit(ticket_id):
 @api.route("/ai/categorize", methods=["POST"])
 @login_required
 def ai_categorize():
-    data = request.get_json(silent=True) or {}
-    title, description = data.get("title", ""), data.get("description", "")
+    data        = request.get_json(silent=True) or {}
+    title       = data.get("title", "")
+    description = data.get("description", "")
     if not title and not description:
         return jsonify({"error": "Podaj pole title lub description"}), 400
     return jsonify(categorize(title, description))

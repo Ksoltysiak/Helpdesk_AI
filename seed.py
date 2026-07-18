@@ -2,6 +2,7 @@ import sqlite3
 import os
 import json
 from datetime import datetime, timedelta
+from werkzeug.security import generate_password_hash
 from db import DB_PATH, init_db
 from ai import categorize, SLA_HOURS
 
@@ -48,8 +49,12 @@ def seed():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
 
-    for u in USERS:
-        conn.execute("INSERT INTO users (username, password, name, role, email) VALUES (?,?,?,?,?)", u)
+    for username, password, name, role, email in USERS:
+        hashed = generate_password_hash(password)
+        conn.execute(
+            "INSERT INTO users (username, password, name, role, email) VALUES (?,?,?,?,?)",
+            (username, hashed, name, role, email),
+        )
 
     now = datetime.now()
     for title, desc, status, created_by, assigned_to, days_ago in TICKETS:

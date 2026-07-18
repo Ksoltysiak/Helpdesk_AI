@@ -7,6 +7,7 @@ services:
       - helpdesk-data:/app/data
     environment:
       - DB_PATH=/app/data/helpdesk.db
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY env var before starting}
 
 volumes:
   helpdesk-data:

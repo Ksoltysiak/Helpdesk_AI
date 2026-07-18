@@ -5,8 +5,9 @@ const API = '/api';
 
 let state = {
   userId: null,
-  user: null,
-  role: null,
+  token:  null,
+  user:   null,
+  role:   null,
   currentView: 'dashboard',
   filterStatus: '',
   filterPriority: '',
@@ -24,7 +25,7 @@ const TRANSITIONS = {
 // API HELPERS
 // ============================================================
 function apiHeaders() {
-  return { 'Content-Type': 'application/json', 'X-User-Id': String(state.userId) };
+  return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.token}` };
 }
 
 async function apiFetch(url, options = {}) {
@@ -66,8 +67,10 @@ async function doLogin() {
     if (!res.ok) { showLoginError(data.error || 'Błąd logowania'); return; }
 
     state.userId = data.id;
+    state.token  = data.token;
     state.user   = data.name;
     state.role   = data.role;
+    sessionStorage.setItem('helpdesk_token', data.token);
 
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').classList.add('visible');
@@ -90,8 +93,9 @@ function showLoginError(msg) {
 }
 
 function doLogout() {
-  state.userId = null; state.user = null; state.role = null;
+  state.userId = null; state.token = null; state.user = null; state.role = null;
   state.filterStatus = ''; state.filterPriority = '';
+  sessionStorage.removeItem('helpdesk_token');
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('app').classList.remove('visible');
   document.getElementById('loginUsername').value = '';
