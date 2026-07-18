@@ -1,7 +1,9 @@
-from flask import Flask, jsonify
+from flask import Flask, send_from_directory
 import os
 from db import close_db, init_db, DB_PATH
 from routes import api
+
+FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "frontend")
 
 
 def create_app():
@@ -11,20 +13,17 @@ def create_app():
 
     @app.after_request
     def cors(response):
-        # Integracja z frontendem: zezwala aplikacji frontendowej dzialajacej
-        # na innym porcie/domenie na wywolywanie tego API z poziomu przegladarki.
         response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-User-Id"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
         return response
 
-    @app.route("/")
-    def index():
-        return jsonify({
-            "api": "Inteligentny HelpDesk IT",
-            "status": "dziala",
-            "info": "Punkty koncowe dostepne pod /api/...",
-        })
+    @app.route("/", defaults={"path": ""})
+    @app.route("/<path:path>")
+    def serve_frontend(path):
+        if path and os.path.exists(os.path.join(FRONTEND_DIR, path)):
+            return send_from_directory(FRONTEND_DIR, path)
+        return send_from_directory(FRONTEND_DIR, "index.html")
 
     return app
 

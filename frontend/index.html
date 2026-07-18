@@ -4,15 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HelpDesk IT</title>
-  
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/lucide@0.378.0/dist/umd/lucide.min.js"></script>
-  
+
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<div id="globalError" style="display:none;position:fixed;top:1rem;right:1rem;z-index:9999;background:var(--color-error);color:#fff;padding:0.75rem 1.25rem;border-radius:var(--radius-md);font-size:var(--text-sm);max-width:320px;box-shadow:0 4px 12px rgba(0,0,0,0.2)"></div>
 
 <div class="login-screen" id="loginScreen">
   <div class="login-box">
@@ -25,33 +27,26 @@
       </div>
     </div>
     <p class="login-subtitle">System zarządzania zgłoszeniami IT</p>
-    
-    <div class="role-cards" id="roleCards">
-      <div class="role-card selected" data-role="pracownik" onclick="selectRole('pracownik')">
-        <div class="role-card-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        </div>
-        <div class="role-card-title">Pracownik</div>
-        <div class="role-card-desc">Zgłaszaj problemy IT</div>
-      </div>
-      <div class="role-card" data-role="technik" onclick="selectRole('technik')">
-        <div class="role-card-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-        </div>
-        <div class="role-card-title">Technik IT</div>
-        <div class="role-card-desc">Zarządzaj zgłoszeniami</div>
-      </div>
-    </div>
 
     <div class="form-field">
-      <label class="form-label" for="loginName">Imię i nazwisko</label>
-      <input class="form-input" type="text" id="loginName" placeholder="Wpisz swoje imię...">
+      <label class="form-label" for="loginUsername">Nazwa użytkownika</label>
+      <input class="form-input" type="text" id="loginUsername" placeholder="np. k.nowak" autocomplete="username">
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="loginPassword">Hasło</label>
+      <input class="form-input" type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
     </div>
 
-    <button class="btn btn-primary btn-full" onclick="doLogin()">
+    <div id="loginError" style="display:none;color:var(--color-error);font-size:var(--text-sm);margin-bottom:0.75rem;padding:0.5rem 0.75rem;background:color-mix(in srgb,var(--color-error) 10%,transparent);border-radius:var(--radius-sm)"></div>
+
+    <button class="btn btn-primary btn-full" id="loginBtn" onclick="doLogin()">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
       Zaloguj się
     </button>
+
+    <p style="margin-top:1rem;font-size:var(--text-xs);color:var(--color-text-muted);text-align:center">
+      Pracownik: k.nowak / haslo123 &nbsp;·&nbsp; Technik: m.lewandowski / tech123
+    </p>
   </div>
 </div>
 
@@ -85,10 +80,6 @@
       <div class="header-actions">
         <button class="icon-btn" onclick="toggleTheme()" id="themeToggle" aria-label="Przełącz motyw">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-        </button>
-        <button class="icon-btn" aria-label="Powiadomienia">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-          <span class="notif-dot" id="notifDot"></span>
         </button>
         <button class="btn btn-sm btn-secondary" onclick="doLogout()">Wyloguj</button>
       </div>
