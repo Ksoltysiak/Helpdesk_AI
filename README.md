@@ -9,7 +9,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 
 ## Spis treści
 
-- [Struktura plików](#struktura-plików)
+- [Struktura projektu](#struktura-projektu)
 - [Szybki start (Docker)](#szybki-start-docker)
 - [Szybki start (lokalnie, bez Dockera)](#szybki-start-lokalnie-bez-dockera)
 - [Testy](#testy)
@@ -24,25 +24,61 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 
 ---
 
-## Struktura plików
+## Struktura projektu
 
-| Plik                 | Odpowiada za                                              |
-|-----------------------|------------------------------------------------------------|
-| `app.py`              | Punkt startowy, nagłówki bezpieczeństwa, serwowanie frontendu i dokumentacji |
-| `openapi.yaml`        | Specyfikacja API (OpenAPI 3.0) — źródło prawdy dla dokumentacji |
-| `db.py`               | Schemat bazy danych, połączenie, zapis audytu              |
-| `auth.py`             | JWT, generowanie/weryfikacja tokenów, dekoratory RBAC      |
-| `rate_limit.py`       | Instancja Flask-Limiter (ograniczanie żądań)               |
-| `ai.py`               | Automatyczna kategoryzacja zgłoszeń                        |
-| `routes.py`           | Wszystkie punkty końcowe API                               |
-| `seed.py`             | Wypełnienie bazy danymi testowymi (hasła hashowane)        |
-| `demo.py`             | Skrypt sprawdzający E2E — weryfikuje całe API              |
-| `tests/`              | Testy jednostkowe i integracyjne (`pytest`)                |
-| `requirements-dev.txt`| Zależności potrzebne wyłącznie do testów                   |
-| `Dockerfile`          | Obraz kontenera, uruchomienie jako użytkownik bez uprawnień root |
-| `docker-compose.yml`  | Uruchomienie usługi z trwałym wolumenem i wymaganym SECRET_KEY |
-| `.env.example`        | Szablon zmiennych środowiskowych                           |
-| `frontend/`           | Interfejs użytkownika (HTML + CSS + JS)                    |
+```
+Helpdesk_AI/
+├── backend/                    # Warstwa serwerowa (Python/Flask)
+│   ├── app.py                  # Punkt startowy, nagłówki bezpieczeństwa, Swagger UI
+│   ├── auth.py                 # JWT, generowanie/weryfikacja tokenów, RBAC
+│   ├── ai.py                   # Automatyczna kategoryzacja zgłoszeń
+│   ├── db.py                   # Schemat bazy danych, połączenie, zapis audytu
+│   ├── routes.py               # Wszystkie punkty końcowe API
+│   ├── rate_limit.py           # Instancja Flask-Limiter
+│   ├── seed.py                 # Wypełnienie bazy danymi testowymi
+│   └── requirements.txt        # Zależności podstawowe Pythona
+│
+├── frontend/                   # Warstwa kliencka (HTML/CSS/JS)
+│   ├── index.html              # Interfejs użytkownika
+│   ├── script.js               # Logika SPA (Single Page Application)
+│   └── style.css               # Style i design tokens (Dark/Light mode)
+│
+├── docker/                     # Konteneryzacja & Nginx
+│   ├── Dockerfile              # Obraz kontenera backend z HEALTHCHECK
+│   ├── docker-entrypoint.sh    # Automatyczna inicjalizacja bazy
+│   ├── nginx.conf              # Konfiguracja Nginx (Reverse Proxy & Gzip)
+│   └── .dockerignore           # Wykluczenia plików z kontekstu builda
+│
+├── .github/workflows/          # Potok CI/CD (GitHub Actions)
+│   └── tests.yml               # Automatyczne testowanie i weryfikacja (wcześniej ci.yml)
+│
+├── scripts/                    # Skrypty pomocnicze
+│   ├── demo.py                 # Skrypt testów integracyjnych REST API (E2E)
+│   └── generate_ssl.py         # Skrypt generowania certyfikatów SSL
+│
+├── tests/                      # Testy jednostkowe i integracyjne (pytest)
+│   ├── conftest.py             # Konfiguracja środowiska testowego
+│   ├── test_ai.py              # Testy modułu AI
+│   ├── test_api_auth.py        # Testy uwierzytelniania i autoryzacji
+│   ├── test_api_security.py    # Testy bezpieczeństwa (limity, nagłówki)
+│   ├── test_api_tickets.py     # Testy zgłoszeń (tworzenie, filtry)
+│   ├── test_openapi.py         # Testy zgodności ze specyfikacją OpenAPI
+│   ├── test_tokens.py          # Testy sprawdzania i ważności tokenów
+│   └── test_transitions.py     # Testy dozwolonych przejść statusów
+│
+├── docs/                       # Dokumentacja projektowa
+│   └── projekt.txt             # Założenia projektu inżynierskiego
+│
+├── Makefile                    # Skróty komend operacyjnych (CLI)
+├── docker-compose.yml          # Wielokontenerowa orkiestracja (Nginx + Backend)
+├── openapi.yaml                # Specyfikacja API w formacie OpenAPI 3.0
+├── pytest.ini                  # Konfiguracja testów pytest
+├── .coveragerc                 # Konfiguracja analizy pokrycia kodu (coverage)
+├── requirements-dev.txt        # Zależności potrzebne wyłącznie do testów
+├── .env.example                # Szablon zmiennych środowiskowych
+├── .gitignore                  # Pliki ignorowane przez Git
+└── README.md                   # Dokumentacja projektu
+```
 
 ---
 
@@ -66,7 +102,7 @@ docker compose up --build
 **3. Wypełnij bazę danych:**
 
 ```bash
-docker compose exec helpdesk python seed.py
+docker compose exec helpdesk python backend/seed.py
 ```
 
 Aplikacja będzie dostępna pod `http://localhost:5000`. Baza danych SQLite jest
@@ -87,9 +123,9 @@ Wymagany **Python 3.8+**.
 
 ```bash
 cp .env.example .env          # ustaw SECRET_KEY
-py -m pip install -r requirements.txt
-py seed.py                    # tworzy i wypełnia bazę danymi testowymi
-py app.py                     # startuje serwer na http://127.0.0.1:5000
+py -m pip install -r backend/requirements.txt
+py backend/seed.py            # tworzy i wypełnia bazę danymi testowymi
+py backend/app.py             # startuje serwer na http://127.0.0.1:5000
 ```
 
 ---
@@ -125,7 +161,7 @@ JWT, kategoryzację AI, przejścia statusów, ścieżkę audytu oraz testy negat
 (brak tokenu, podrobiony token, przekroczone limity długości, nieznany endpoint):
 
 ```bash
-py demo.py
+py scripts/demo.py
 ```
 
 Oczekiwany wynik:
@@ -231,11 +267,11 @@ z kodem 400 i listą dozwolonych przejść.
 
 ## Kategoryzacja AI
 
-Moduł `ai.py` przy każdym nowym zgłoszeniu automatycznie nadaje **kategorię**
+Moduł `backend/ai.py` przy każdym nowym zgłoszeniu automatycznie nadaje **kategorię**
 (Sprzęt, Oprogramowanie, Sieć, Poczta, Konta i dostęp, Bezpieczeństwo,
 Peryferia) oraz **priorytet** (Niski, Średni, Wysoki, Krytyczny). Priorytet
 wyznacza termin SLA. Domyślnie moduł działa lokalnie (bez kluczy API i
-kosztów); w pliku `ai.py` opisano, jak podłączyć prawdziwy model językowy
+kosztów); w pliku `backend/ai.py` opisano, jak podłączyć prawdziwy model językowy
 (np. OpenAI) bez zmian w reszcie back-endu.
 
 **Zasada triażu:** gdy zgłoszenie pasuje do kilku słów kluczowych naraz
@@ -248,11 +284,11 @@ zaklasyfikowany jako rutynowa prośba o reset hasła i nie dostanie
 
 ## Dane testowe (logowanie)
 
-Dostępne po uruchomieniu `seed.py`. Hasła są hashowane — poniżej podane są
+Dostępne po uruchomieniu `backend/seed.py`. Hasła są hashowane — poniżej podane są
 oryginalne wartości do zalogowania się przez interfejs.
 
 | Login          | Hasło    | Rola      |
-|-----------------|----------|-----------|
+|-----------------|----------|-----------| 
 | k.nowak         | haslo123 | pracownik |
 | p.wisniewski    | haslo123 | pracownik |
 | a.kowalczyk     | haslo123 | pracownik |
@@ -268,7 +304,7 @@ oryginalne wartości do zalogowania się przez interfejs.
 |---------------------------------------------------|--------------------------------------------------------------|
 | `required variable SECRET_KEY is missing`        | Skopiuj `.env.example` do `.env` i ustaw `SECRET_KEY`        |
 | `'py' nie jest rozpoznawane...`                  | Zainstaluj Pythona z python.org, zaznacz „Add to PATH"       |
-| `No module named flask`                          | Wpisz `py -m pip install -r requirements.txt`                |
+| `No module named flask`                          | Wpisz `py -m pip install -r backend/requirements.txt`        |
 | `Address already in use` / port zajęty           | Zamknij poprzedni serwer (Ctrl+C w jego terminalu)           |
 | `401 Wymagana autoryzacja`                       | Token wygasł lub nie podano — zaloguj się ponownie           |
 | `429 Too Many Requests`                          | Zbyt wiele prób logowania — odczekaj minutę                  |

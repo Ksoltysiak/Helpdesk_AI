@@ -6,7 +6,7 @@ from routes import api
 from rate_limit import limiter
 
 BASE_DIR     = os.path.dirname(__file__)
-FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+FRONTEND_DIR = os.path.join(BASE_DIR, "..", "frontend")
 
 DOCS_URL = "/api/docs"
 SPEC_URL = "/api/openapi.yaml"
@@ -27,7 +27,7 @@ def create_app():
 
     @app.route(SPEC_URL)
     def openapi_spec():
-        return send_from_directory(BASE_DIR, "openapi.yaml", mimetype="application/yaml")
+        return send_from_directory(os.path.join(BASE_DIR, ".."), "openapi.yaml", mimetype="application/yaml")
 
     @app.after_request
     def security_headers(response):

@@ -2,7 +2,17 @@ import requests
 import json
 import sys
 
+# Dynamiczna detekcja: lokalny dev na porcie 5000 lub Docker Nginx na porcie 80
 BASE = "http://localhost:5000/api"
+try:
+    requests.get("http://localhost:5000/health", timeout=1)
+except requests.exceptions.RequestException:
+    try:
+        requests.get("http://localhost/api/health", timeout=1)
+        BASE = "http://localhost/api"
+    except requests.exceptions.RequestException:
+        print("Serwer nie odpowiada. Uruchom backend lokalnie (py backend/app.py) lub przez Docker (make up)")
+        sys.exit(1)
 
 ok = 0
 fail = 0
@@ -32,13 +42,6 @@ def section(title):
 def auth(token):
     """Naglowek autoryzacyjny z tokenem JWT."""
     return {"Authorization": f"Bearer {token}"}
-
-
-try:
-    requests.get("http://localhost:5000/", timeout=2)
-except requests.exceptions.RequestException:
-    print("Serwer nie odpowiada. Uruchom najpierw:  py app.py")
-    sys.exit(1)
 
 
 section("1. LOGOWANIE I ROLE (RBAC)")

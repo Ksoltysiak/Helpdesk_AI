@@ -1,0 +1,31 @@
+Projekt Inżynierski
+Temat projektu: Inteligentny system zarządzania zgłoszeniami IT klasy HelpDesk z automatyczną kategoryzacją AI dla małych i średnich przedsiębiorstw (MŚP). System realizowany jest w architekturze klient–serwer i udostępniany w skonteneryzowanym środowisku wdrożeniowym.
+1. Cel i uzasadnienie projektu
+Celem projektu jest zbudowanie scentralizowanego systemu wspierającego procesy pierwszej i drugiej linii wsparcia IT (First & Second Line Support) w organizacji. System automatyzuje rejestrację, klasyfikację oraz monitorowanie pełnego cyklu życia zgłoszenia, porządkując pracę działu IT zgodnie z założeniami zarządzania incydentami. Rozwiązanie jest skierowane do małych i średnich przedsiębiorstw, które potrzebują uporządkowanej obsługi zgłoszeń bez wdrażania rozbudowanych, kosztownych platform ITSM.
+Kluczowym elementem systemu jest integracja z modelem sztucznej inteligencji, która pozwala odciążyć osoby przyjmujące zgłoszenia poprzez automatyczną analizę treści każdego nowego zgłoszenia. Na podstawie opisu problemu model nadaje kategorię oraz priorytet, dzięki czemu zgłoszenie trafia do obsługi już wstępnie sklasyfikowane, a czas reakcji może być kontrolowany w oparciu o ustalone progi SLA.
+2. Szczegółowy opis funkcjonalności aplikacji
+Aplikacja realizuje swoje funkcje w obrębie czterech głównych modułów biznesowych. Komunikacja pomiędzy warstwą kliencką a serwerową odbywa się poprzez interfejs REST API, a dane przechowywane są w relacyjnej bazie danych.
+Moduł 1: Portal Samoobsługowy Pracownika
+Funkcja: Udostępnienie pracownikowi bezpiecznego logowania oraz interfejsu do zgłaszania problemów i śledzenia ich obsługi.
+Gromadzenie danych: Formularz zgłoszenia przyjmuje tytuł problemu, szczegółowy opis tekstowy oraz opcjonalne załączniki.
+Przetwarzanie i wysyłka: Dane zalogowanego pracownika są przesyłane przez API REST i zapisywane w bazie z domyślnym statusem „Nowe”.
+Prezentacja: Moduł pobiera z bazy aktualne statusy wyłącznie własnych zgłoszeń pracownika i prezentuje je w formie czytelnego rejestru, umożliwiając bieżące monitorowanie postępów (real-time tracking).
+Moduł 2: Konsola Obsługi IT
+Funkcja: Główne narzędzie pracy techników wsparcia, służące do zarządzania kolejką wszystkich zgłoszeń w systemie.
+Pobieranie danych: Agregacja i prezentacja wszystkich aktywnych zgłoszeń wraz z możliwością filtrowania po statusie, priorytecie i kategorii oraz podglądem statystyk na pulpicie.
+Zarządzanie incydentem: Technik podejmuje zgłoszenie (zmiana statusu na „W trakcie”), może zmienić przypisaną kategorię, dodać notatkę wewnętrzną widoczną wyłącznie dla zespołu IT, a na końcu sfinalizować obsługę (status „Zamknięte”).
+Wysyłka danych: Każda operacja technika wysyła do bazy żądanie aktualizacji i automatycznie wyzwala mechanizm rejestrowania zmian w ścieżce audytu.
+Moduł 3: Automatyzacja i Sztuczna Inteligencja
+Funkcja: Symulacja pracy dyspozytora IT (Level 0 Support) poprzez automatyczną klasyfikację zgłoszeń.
+Przepływ danych: W momencie utworzenia nowego zgłoszenia moduł pobiera jego opis tekstowy i kieruje zapytanie do interfejsu API modelu językowego (LLM).
+Wynik: Model zwraca ustrukturyzowaną odpowiedź w formacie JSON, zawierającą przewidywaną kategorię problemu (np. „Sieć”) oraz priorytet (np. „Wysoki”, „Krytyczny”).
+Zapis: Backend zapisuje nadaną kategorię i priorytet w rekordzie zgłoszenia jeszcze przed podjęciem go przez technika; priorytet wyznacza termin SLA. W razie niedostępności modelu system przechodzi na klasyfikację rezerwową, a zgłoszenie pozostaje możliwe do ręcznej kategoryzacji.
+Moduł 4: Ścieżka Audytu i Bezpieczeństwo
+Funkcja: Niezaprzeczalność zdarzeń oraz zarządzanie uprawnieniami w modelu kontroli dostępu opartej na rolach (RBAC).
+Działanie: Dedykowany mechanizm w warstwie logiki biznesowej przechwytuje każdą zmianę w obiekcie zgłoszenia, a dostęp do poszczególnych operacji jest weryfikowany na podstawie roli użytkownika (pracownik, technik, administrator).
+Zapis danych: System automatycznie zapisuje w osobnej tabeli wpis audytu zawierający dokładny czas zdarzenia (timestamp), identyfikator użytkownika dokonującego zmiany oraz wartość przed i po zmianie (np. zmiana statusu z „W trakcie” na „Rozwiązane”). Dane te stanowią podstawę do raportowania SLA oraz kontroli poprawności przejść między statusami zgłoszenia.
+3. Podział ról w zespole projektowym
+Jakub Sołtysiak — Backend i Bazy Danych: Odpowiada za architekturę relacyjnej bazy danych, logikę biznesową cyklu życia zgłoszenia oraz udostępnienie punktów końcowych API REST służących do komunikacji z warstwą kliencką. W zakres jego prac wchodzi rejestracja zgłoszeń, zarządzanie statusami i walidacja przejść między nimi.
+Jakub Grzebyta — API, Sztuczna Inteligencja i Bezpieczeństwo: Odpowiada za integrację aplikacji z zewnętrznym modelem AI realizującym automatyczną kategoryzację zgłoszeń oraz za logikę ścieżki audytu (Audit Trail) i kontrolę dostępu opartą na rolach. Współtworzy warstwę API wspólnie z drugą osobą odpowiedzialną za backend.
+Jan Buliński — Interfejsy Webowe / Frontend: Odpowiada za integrację danych z API z widokami graficznymi i budowę spójnego interfejsu użytkownika: Portalu Samoobsługowego Pracownika oraz analitycznej Konsoli Obsługi IT.
+Dominik Łakomy — Infrastruktura i DevOps: Odpowiada za konteneryzację całej aplikacji wraz z bazą danych (Docker / Docker Compose), co zapewnia powtarzalność środowiska wdrożeniowego oraz izolację procesów.
