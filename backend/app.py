@@ -18,6 +18,10 @@ def create_app():
     app.teardown_appcontext(close_db)
     limiter.init_app(app)
 
+    @app.route("/health")
+    def health():
+        return {"status": "ok"}
+
     # Interaktywna dokumentacja API. Pliki Swagger UI sa dolaczone do paczki
     # (bez CDN) — dzialaja offline i nie wymagaja luzniejszej polityki CSP.
     app.register_blueprint(

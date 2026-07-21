@@ -5,22 +5,26 @@ Back-end + front-end systemu HelpDesk dla MŚP: REST API w technologii
 życia zgłoszenia IT, kontrolę dostępu opartą na rolach (RBAC), automatyczną
 kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 
+System jest skonteneryzowany w architekturze wielokontenerowej **Nginx (Reverse Proxy) + Flask Backend**, z automatycznym monitoringiem zdrowia (Healthcheck) oraz potokiem CI/CD.
+
 ---
 
 ## Spis treści
 
 - [Struktura projektu](#struktura-projektu)
-- [Szybki start (Docker)](#szybki-start-docker)
+- [Architektura DevOps & Konteneryzacja](#architektura-devops--konteneryzacja)
+- [Szybki start (Docker Compose)](#szybki-start-docker-compose)
+- [Automatyzacja deweloperska (Makefile)](#automatyzacja-deweloperska-makefile)
 - [Szybki start (lokalnie, bez Dockera)](#szybki-start-lokalnie-bez-dockera)
 - [Testy](#testy)
 - [Weryfikacja działania](#weryfikacja-działania)
+- [Potok CI/CD (GitHub Actions)](#potok-cicd-github-actions)
 - [Bezpieczeństwo](#bezpieczeństwo)
 - [Role użytkowników](#role-użytkowników)
 - [Punkty końcowe API](#punkty-końcowe-api)
 - [Cykl życia zgłoszenia](#cykl-życia-zgłoszenia-dozwolone-przejścia-statusów)
 - [Kategoryzacja AI](#kategoryzacja-ai)
 - [Dane testowe (logowanie)](#dane-testowe-logowanie)
-- [Rozwiązywanie problemów](#rozwiązywanie-problemów)
 
 ---
 
@@ -82,7 +86,22 @@ Helpdesk_AI/
 
 ---
 
-## Szybki start (Docker)
+## Architektura DevOps & Konteneryzacja
+
+Aplikacja wykorzystuje **izolowaną architekturę wielokontenerową**:
+
+1. **`web` (Nginx:alpine)** – wystawiony na porcie `80`:
+   - Serwuje pliki statyczne z `frontend/` ze stopniem kompresji **gzip**.
+   - Przekierowuje zapytania do `/api/` (Reverse Proxy) do kontenera backendowego.
+   - Wymusza nagłówki bezpieczeństwa HTTP.
+2. **`backend` (Python Flask + Gunicorn)** – ukryty w prywatnej sieci `helpdesk-net`:
+   - Działa jako nieuprzywilejowany użytkownik (`USER app`).
+   - Posiada automatyczny monitoring zdrowia (`HEALTHCHECK CMD curl`).
+   - Trwały wolumen `helpdesk-data` dla bazy SQLite.
+
+---
+
+## Szybki start (Docker Compose)
 
 Wymaga zainstalowanego **Docker** / **Docker Desktop**.
 
@@ -90,30 +109,40 @@ Wymaga zainstalowanego **Docker** / **Docker Desktop**.
 
 ```bash
 cp .env.example .env
-# Ustaw SECRET_KEY w pliku .env na długi, losowy ciąg znaków
+# Ustaw SECRET_KEY w pliku .env
 ```
 
 **2. Uruchom:**
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-**3. Wypełnij bazę danych:**
+**3. Wypełnij bazę danymi testowymi:**
 
 ```bash
-docker compose exec helpdesk python backend/seed.py
+docker compose exec backend python backend/seed.py
 ```
 
-Aplikacja będzie dostępna pod `http://localhost:5000`. Baza danych SQLite jest
-przechowywana w trwałym wolumenie `helpdesk-data` — dane przetrwają restart
-kontenera.
+Aplikacja dostępna pod adresem: `http://localhost`.
 
 Zatrzymanie:
-
 ```bash
 docker compose down
 ```
+
+---
+
+## Automatyzacja deweloperska (Makefile)
+
+Wszystkie kluczowe komendy operacyjne są dostępne przez `Makefile`:
+
+- `make up` – uruchomienie środowiska kontenerowego w tle
+- `make down` – zatrzymanie i usunięcie kontenerów
+- `make seed` – zasilenie bazy danych testowymi rekordami
+- `make test` – uruchomienie pakietu testów integracyjnych
+- `make logs` – podgląd logów w czasie rzeczywistym
+- `make build` – przebudowanie obrazów Docker
 
 ---
 
@@ -122,18 +151,17 @@ docker compose down
 Wymagany **Python 3.8+**.
 
 ```bash
-cp .env.example .env          # ustaw SECRET_KEY
+cp .env.example .env
 py -m pip install -r backend/requirements.txt
-py backend/seed.py            # tworzy i wypełnia bazę danymi testowymi
-py backend/app.py             # startuje serwer na http://127.0.0.1:5000
+py backend/seed.py
+py backend/app.py
 ```
 
 ---
 
 ## Testy
 
-Projekt ma zestaw **187 automatycznych sprawdzeń** w trzech warstwach
-(166 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
+Projekt ma zestaw **187 automatycznych sprawdzeń** w trzech warstwach (166 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
 
 ```bash
 py -m pip install -r requirements-dev.txt
@@ -146,22 +174,19 @@ py -m pytest
 | Integracyjne | 130 | Flask + baza: RBAC, walidacja, nagłówki, limit żądań, zgodność dokumentacji |
 | E2E (`demo.py`) | 21 | Pełny przepływ przez działający serwer |
 
-Testy uruchamiają się automatycznie przy każdym pull requeście
-(`.github/workflows/tests.yml`).
+Testy uruchamiają się automatycznie przy każdym pull requeście (`.github/workflows/tests.yml`).
 
-Pełny opis — zakres każdej warstwy, raport pokrycia, weryfikacja mutacyjna
-i znane ograniczenia — znajduje się w pliku **[TESTING.md](TESTING.md)**.
+Pełny opis — zakres każdej warstwy, raport pokrycia, weryfikacja mutacyjna i znane ograniczenia — znajduje się w pliku **[TESTING.md](TESTING.md)**.
 
 ---
 
 ## Weryfikacja działania
 
-Gdy serwer działa, skrypt `demo.py` sprawdza wszystkie operacje API — logowanie
-JWT, kategoryzację AI, przejścia statusów, ścieżkę audytu oraz testy negatywne
-(brak tokenu, podrobiony token, przekroczone limity długości, nieznany endpoint):
+Gdy serwer działa, skrypt `scripts/demo.py` automatycznie sprawdza wszystkie operacje API — logowanie JWT, kategoryzację AI, przejścia statusów, ścieżkę audytu oraz testy negatywne (brak tokenu, podrobiony token, przekroczone limity długości, nieznany endpoint):
 
 ```bash
 py scripts/demo.py
+# lub: make test
 ```
 
 Oczekiwany wynik:
@@ -170,19 +195,20 @@ Oczekiwany wynik:
 WYNIK: 21 testow OK, 0 bledow
 ```
 
-Ręczne sprawdzenie endpointów (wymaga najpierw zalogowania się i pobrania tokenu):
+## Potok CI/CD (GitHub Actions)
 
-```bash
-# Zaloguj się i zapisz token
-TOKEN=$(curl -s -X POST http://localhost:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"m.lewandowski","password":"tech123"}' \
-  | python -c "import json,sys; print(json.load(sys.stdin)['token'])")
+Plik `.github/workflows/tests.yml` (wcześniej `ci.yml`) automatycznie wykonuje następujące kroki przy każdym commicie / pull requeście na gałąź `main`:
+1. Weryfikacja składni i linter kodu Python.
+2. Wykonanie testów jednostkowych i integracyjnych przy użyciu `pytest`.
+3. Testowe przebudowanie architektury Docker Compose.
 
-# Użyj tokenu w nagłówku Authorization
-curl http://localhost:5000/api/dashboard \
-  -H "Authorization: Bearer $TOKEN"
-```
+## Potok CI/CD (GitHub Actions)
+
+Plik `.github/workflows/ci.yml` automatycznie wykonuje następujące kroki przy każdym commicie / pull requescie na gałąź `main`:
+1. Weryfikacja składni i linter kodu Python.
+2. Zasilenie bazy testowej i uruchomienie serwera.
+3. Wykonanie 17 testów integracyjnych REST API.
+4. Testowe przebudowanie architektury Docker Compose.
 
 ---
 
@@ -190,20 +216,12 @@ curl http://localhost:5000/api/dashboard \
 
 | Mechanizm | Implementacja |
 |-----------|---------------|
-| Hashowanie haseł | `werkzeug` scrypt — brak plaintext w bazie |
-| Uwierzytelnianie | JWT (HS256, ważność 8h) — podpisane tokeny, nie do podrobienia |
-| Ograniczanie żądań | Flask-Limiter: 10 prób/min, 30/h na endpoincie logowania |
-| Nagłówki HTTP | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Content-Security-Policy` |
-| CORS | Brak — frontend serwowany z tego samego serwera (same-origin) |
-| Docker | Proces gunicorn działa jako systemowy użytkownik bez uprawnień root |
-| Walidacja wejścia | Limity długości: tytuł ≤ 200, opis ≤ 5000, notatka ≤ 2000 znaków |
-| Klucz tajny | `SECRET_KEY` wymagany jako zmienna środowiskowa — compose odmawia startu bez niego |
-
-**Wymaganie produkcyjne:** wygeneruj `SECRET_KEY` poleceniem:
-```bash
-python -c "import secrets; print(secrets.token_hex(32))"
-```
-i ustaw go jako zmienną środowiskową przed uruchomieniem.
+| Hashowanie haseł | `werkzeug` scrypt |
+| Uwierzytelnianie | JWT (HS256, ważność 8h) |
+| Ograniczanie żądań | Flask-Limiter (10 próby/min na logowaniu) |
+| Nagłówki HTTP | Nginx + Flask: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy` |
+| Izolacja sieciowa | Backend ukryty w prywatnej sieci `helpdesk-net`, dostęp tylko przez Reverse Proxy |
+| Docker Security | Kontener backend działa z dedykowanym kontem `USER app` bez uprawnień roota |
 
 ---
 
@@ -219,15 +237,7 @@ i ustaw go jako zmienną środowiskową przed uruchomieniem.
 
 ## Punkty końcowe API
 
-**Pełna, interaktywna dokumentacja:** po uruchomieniu aplikacji dostępna pod
-adresem **`http://localhost:5000/api/docs`** (Swagger UI). Można z niej wysyłać
-prawdziwe żądania — wystarczy zalogować się przez `POST /auth/login`, skopiować
-token i wkleić go przyciskiem **Authorize**.
-
-Źródłem prawdy jest plik **[`openapi.yaml`](openapi.yaml)** (OpenAPI 3.0),
-serwowany również pod `/api/openapi.yaml`. Poniższa tabela to skrót
-orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
-(`tests/test_openapi.py`).
+**Pełna, interaktywna dokumentacja:** po uruchomieniu aplikacji dostępna pod adresem **`http://localhost:5000/api/docs`** (Swagger UI). Źródłem prawdy jest plik **[`openapi.yaml`](openapi.yaml)** (OpenAPI 3.0).
 
 | Metoda | Ścieżka                   | Rola          | Opis                                      |
 |--------|----------------------------|---------------|---------------------------------------------|
@@ -246,7 +256,6 @@ orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
 ```
 Authorization: Bearer <token>
 ```
-Token jest zwracany przez endpoint `/api/auth/login`.
 
 **Filtry dla `GET /api/tickets`** (tylko technik/admin):
 `?status=Nowe`, `?priority=Krytyczny`, `?category=Siec`.
@@ -260,32 +269,19 @@ Nowe → W trakcie → Rozwiazane → Zamkniete
               ↘ Wstrzymane ↗
 ```
 
-Próba przeskoczenia etapu (np. `Nowe → Zamkniete`) jest odrzucana przez API
-z kodem 400 i listą dozwolonych przejść.
+Próba przeskoczenia etapu (np. `Nowe → Zamkniete`) jest odrzucana przez API z kodem 400 i listą dozwolonych przejść.
 
 ---
 
 ## Kategoryzacja AI
 
-Moduł `backend/ai.py` przy każdym nowym zgłoszeniu automatycznie nadaje **kategorię**
-(Sprzęt, Oprogramowanie, Sieć, Poczta, Konta i dostęp, Bezpieczeństwo,
-Peryferia) oraz **priorytet** (Niski, Średni, Wysoki, Krytyczny). Priorytet
-wyznacza termin SLA. Domyślnie moduł działa lokalnie (bez kluczy API i
-kosztów); w pliku `backend/ai.py` opisano, jak podłączyć prawdziwy model językowy
-(np. OpenAI) bez zmian w reszcie back-endu.
+Moduł `backend/ai.py` przy każdym nowym zgłoszeniu automatycznie nadaje **kategorię** (Sprzęt, Oprogramowanie, Sieć, Poczta, Konta i dostęp, Bezpieczeństwo, Peryferia) oraz **priorytet** (Niski, Średni, Wysoki, Krytyczny). Priorytet wyznacza termin SLA. Domyślnie moduł działa lokalnie (bez kluczy API i kosztów).
 
-**Zasada triażu:** gdy zgłoszenie pasuje do kilku słów kluczowych naraz
-(np. „phishing" i „hasło"), wybierane jest dopasowanie o **najwyższym
-priorytecie**. Dzięki temu incydent bezpieczeństwa nie zostanie
-zaklasyfikowany jako rutynowa prośba o reset hasła i nie dostanie
-łagodniejszego terminu SLA (1h zamiast 8h).
+**Zasada triażu:** gdy zgłoszenie pasuje do kilku słów kluczowych naraz (np. „phishing" i „hasło"), wybierane jest dopasowanie o **najwyższym priorytecie**.
 
 ---
 
 ## Dane testowe (logowanie)
-
-Dostępne po uruchomieniu `backend/seed.py`. Hasła są hashowane — poniżej podane są
-oryginalne wartości do zalogowania się przez interfejs.
 
 | Login          | Hasło    | Rola      |
 |-----------------|----------|-----------| 
@@ -295,16 +291,3 @@ oryginalne wartości do zalogowania się przez interfejs.
 | m.lewandowski   | tech123  | technik   |
 | j.zielinska     | tech123  | technik   |
 | admin           | admin123 | admin     |
-
----
-
-## Rozwiązywanie problemów
-
-| Komunikat                                        | Rozwiązanie                                                  |
-|---------------------------------------------------|--------------------------------------------------------------|
-| `required variable SECRET_KEY is missing`        | Skopiuj `.env.example` do `.env` i ustaw `SECRET_KEY`        |
-| `'py' nie jest rozpoznawane...`                  | Zainstaluj Pythona z python.org, zaznacz „Add to PATH"       |
-| `No module named flask`                          | Wpisz `py -m pip install -r backend/requirements.txt`        |
-| `Address already in use` / port zajęty           | Zamknij poprzedni serwer (Ctrl+C w jego terminalu)           |
-| `401 Wymagana autoryzacja`                       | Token wygasł lub nie podano — zaloguj się ponownie           |
-| `429 Too Many Requests`                          | Zbyt wiele prób logowania — odczekaj minutę                  |

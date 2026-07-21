@@ -1,15 +1,36 @@
 services:
-  helpdesk:
+  backend:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    ports:
-      - "5000:5000"
+    container_name: helpdesk-backend
+    restart: unless-stopped
     volumes:
       - helpdesk-data:/app/data
     environment:
       - DB_PATH=/app/data/helpdesk.db
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY env var before starting}
+    networks:
+      - helpdesk-net
+
+  web:
+    image: nginx:alpine
+    container_name: helpdesk-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - helpdesk-net
 
 volumes:
   helpdesk-data:
+
+networks:
+  helpdesk-net:
+    driver: bridge
