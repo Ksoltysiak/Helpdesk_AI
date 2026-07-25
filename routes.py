@@ -17,14 +17,14 @@ TRANSITIONS = {
     "Zamkniete":  [],
 }
 
-_TITLE_MAX    = 200
-_DESC_MAX     = 5000
-_NOTE_MAX     = 2000
-_CATEGORY_MAX = 50
+_TITLE_MAX = 200
+_DESC_MAX  = 5000
+_NOTE_MAX  = 2000
 
 
 def serialize(t):
-    return {
+    keys = t.keys()
+    data = {
         "id":            t["id"],
         "title":         t["title"],
         "description":   t["description"],
@@ -39,6 +39,21 @@ def serialize(t):
         "updated_at":    t["updated_at"],
         "closed_at":     t["closed_at"],
     }
+    # Nazwiska dolaczane przez LEFT JOIN — pozwalaja pokazac w interfejsie
+    # osobe zamiast surowego identyfikatora.
+    if "created_by_name" in keys:
+        data["created_by_name"] = t["created_by_name"]
+    if "assigned_to_name" in keys:
+        data["assigned_to_name"] = t["assigned_to_name"]
+    return data
+
+
+_TICKET_SELECT = """
+    SELECT t.*, uc.name created_by_name, ua.name assigned_to_name
+    FROM tickets t
+    LEFT JOIN users uc ON t.created_by = uc.id
+    LEFT JOIN users ua ON t.assigned_to = ua.id
+"""
 
 
 @api.route("/auth/login", methods=["POST"])
@@ -60,6 +75,13 @@ def login():
 
     token = generate_token(user["id"])
     return jsonify({"id": user["id"], "name": user["name"], "role": user["role"], "token": token})
+
+
+@api.route("/auth/me", methods=["GET"])
+@login_required
+def me():
+    """Odtworzenie sesji na podstawie zapisanego tokenu (np. po odswiezeniu strony)."""
+    return jsonify({"id": g.user["id"], "name": g.user["name"], "role": g.user["role"]})
 
 
 @api.route("/dashboard", methods=["GET"])
@@ -89,17 +111,17 @@ def list_tickets():
 
     if user["role"] == "pracownik":
         rows = db.execute(
-            "SELECT * FROM tickets WHERE created_by = ? ORDER BY id DESC", (user["id"],)
+            _TICKET_SELECT + " WHERE t.created_by = ? ORDER BY t.id DESC", (user["id"],)
         ).fetchall()
     else:
-        query  = "SELECT * FROM tickets WHERE 1=1"
+        query  = _TICKET_SELECT + " WHERE 1=1"
         params = []
         for field in ("status", "priority", "category"):
             value = request.args.get(field)
             if value:
-                query  += f" AND {field} = ?"
+                query  += f" AND t.{field} = ?"
                 params.append(value)
-        query += " ORDER BY id DESC"
+        query += " ORDER BY t.id DESC"
         rows   = db.execute(query, params).fetchall()
 
     return jsonify({"total": len(rows), "tickets": [serialize(t) for t in rows]})
@@ -142,7 +164,7 @@ def create_ticket():
 @login_required
 def get_ticket(ticket_id):
     db = get_db()
-    t  = db.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+    t  = db.execute(_TICKET_SELECT + " WHERE t.id = ?", (ticket_id,)).fetchone()
     if not t:
         return jsonify({"error": "Nie znaleziono zgloszenia"}), 404
     if g.user["role"] == "pracownik" and t["created_by"] != g.user["id"]:

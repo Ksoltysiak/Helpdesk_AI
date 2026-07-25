@@ -24,7 +24,7 @@ def generate_token(user_id: int) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
 
-def _token_from_request() -> str | None:
+def _token_from_request():
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         return auth[7:]

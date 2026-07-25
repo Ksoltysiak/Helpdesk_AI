@@ -394,7 +394,7 @@ function renderTicketTable(tickets, showAuthor) {
       </td>
       <td>${priorityBadge(t.priority)}</td>
       <td>${statusBadge(t.status)}</td>
-      ${showAuthor ? `<td class="td-muted">#${t.created_by}</td>` : ''}
+      ${showAuthor ? `<td class="td-muted">${escHtml(t.created_by_name || '#' + t.created_by)}</td>` : ''}
       <td class="td-muted">${formatDate(t.created_at)}</td>
     </tr>`).join('');
 
@@ -475,6 +475,14 @@ async function openTicket(id) {
             </div>
           </div>
           ${t.sla_deadline ? `<div class="info-item"><div class="info-item-label">Termin SLA</div><div style="font-size:var(--text-sm)">${formatDateTime(t.sla_deadline)}</div></div>` : ''}
+          <div class="info-item">
+            <div class="info-item-label">Zgłaszający</div>
+            <div style="font-size:var(--text-sm)">${escHtml(t.created_by_name || '#' + t.created_by)}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-item-label">Przypisano do</div>
+            <div style="font-size:var(--text-sm)">${escHtml(t.assigned_to_name || '—')}</div>
+          </div>
         </div>
         <div class="info-item" style="margin-bottom:1rem">
           <div class="info-item-label" style="margin-bottom:0.375rem">Opis problemu</div>
@@ -659,10 +667,40 @@ function toggleTheme() {
     : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
 }
 
+// ============================================================
+// SESSION RESTORE
+// ============================================================
+// Po odswiezeniu strony token jest nadal w sessionStorage — sprawdzamy go
+// w backendzie, zamiast ufac danym z przegladarki.
+async function restoreSession() {
+  const token = sessionStorage.getItem('helpdesk_token');
+  if (!token) return;
+
+  state.token = token;
+  try {
+    const data = await apiFetch('/auth/me');
+    state.userId = data.id;
+    state.user   = data.name;
+    state.role   = data.role;
+
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').classList.add('visible');
+    setupSidebar();
+    navigate('dashboard');
+    lucide.createIcons();
+  } catch {
+    // Token wygasl lub jest nieprawidlowy — zostajemy na ekranie logowania.
+    state.token = null;
+    sessionStorage.removeItem('helpdesk_token');
+  }
+}
+
 // Close modal on backdrop click
 document.getElementById('ticketModal').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });
+
+restoreSession();
 
 // Enter key on password field
 document.getElementById('loginPassword').addEventListener('keydown', e => {

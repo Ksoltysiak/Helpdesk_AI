@@ -1,4 +1,4 @@
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, jsonify
 import os
 from db import close_db, init_db, DB_PATH
 from routes import api
@@ -31,6 +31,10 @@ def create_app():
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")
     def serve_frontend(path):
+        # Nieznane sciezki /api/... nie moga trafiac do frontendu — klient API
+        # musi dostac bledny status w JSON, a nie strone HTML z kodem 200.
+        if path.startswith("api/"):
+            return jsonify({"error": "Nie znaleziono punktu koncowego"}), 404
         if path and os.path.exists(os.path.join(FRONTEND_DIR, path)):
             return send_from_directory(FRONTEND_DIR, path)
         return send_from_directory(FRONTEND_DIR, "index.html")

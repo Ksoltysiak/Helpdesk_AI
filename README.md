@@ -92,10 +92,18 @@ py app.py                     # startuje serwer na http://127.0.0.1:5000
 
 ## Weryfikacja działania
 
-Gdy serwer działa, skrypt `demo.py` sprawdza wszystkie operacje API:
+Gdy serwer działa, skrypt `demo.py` sprawdza wszystkie operacje API — logowanie
+JWT, kategoryzację AI, przejścia statusów, ścieżkę audytu oraz testy negatywne
+(brak tokenu, podrobiony token, przekroczone limity długości, nieznany endpoint):
 
 ```bash
 py demo.py
+```
+
+Oczekiwany wynik:
+
+```
+WYNIK: 21 testow OK, 0 bledow
 ```
 
 Ręczne sprawdzenie endpointów (wymaga najpierw zalogowania się i pobrania tokenu):
@@ -150,6 +158,7 @@ i ustaw go jako zmienną środowiskową przed uruchomieniem.
 | Metoda | Ścieżka                   | Rola          | Opis                                      |
 |--------|----------------------------|---------------|---------------------------------------------|
 | POST   | `/api/auth/login`          | —             | Logowanie — zwraca JWT token                |
+| GET    | `/api/auth/me`             | każdy         | Dane zalogowanego użytkownika (odtworzenie sesji) |
 | GET    | `/api/dashboard`           | każdy         | Statystyki + rozkład kategorii              |
 | GET    | `/api/tickets`             | każdy         | Lista zgłoszeń (filtrowana wg roli)         |
 | POST   | `/api/tickets`             | pracownik     | Nowe zgłoszenie + kategoryzacja AI          |
@@ -190,6 +199,12 @@ Peryferia) oraz **priorytet** (Niski, Średni, Wysoki, Krytyczny). Priorytet
 wyznacza termin SLA. Domyślnie moduł działa lokalnie (bez kluczy API i
 kosztów); w pliku `ai.py` opisano, jak podłączyć prawdziwy model językowy
 (np. OpenAI) bez zmian w reszcie back-endu.
+
+**Zasada triażu:** gdy zgłoszenie pasuje do kilku słów kluczowych naraz
+(np. „phishing" i „hasło"), wybierane jest dopasowanie o **najwyższym
+priorytecie**. Dzięki temu incydent bezpieczeństwa nie zostanie
+zaklasyfikowany jako rutynowa prośba o reset hasła i nie dostanie
+łagodniejszego terminu SLA (1h zamiast 8h).
 
 ---
 

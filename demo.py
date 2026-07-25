@@ -4,9 +4,6 @@ import sys
 
 BASE = "http://localhost:5000/api"
 
-PRACOWNIK = {"X-User-Id": "1"}   # Katarzyna Nowak
-TECHNIK = {"X-User-Id": "4"}     # Marek Lewandowski
-
 ok = 0
 fail = 0
 
@@ -32,6 +29,11 @@ def section(title):
     print("=" * 64)
 
 
+def auth(token):
+    """Naglowek autoryzacyjny z tokenem JWT."""
+    return {"Authorization": f"Bearer {token}"}
+
+
 try:
     requests.get("http://localhost:5000/", timeout=2)
 except requests.exceptions.RequestException:
@@ -40,16 +42,29 @@ except requests.exceptions.RequestException:
 
 
 section("1. LOGOWANIE I ROLE (RBAC)")
-show("Logowanie pracownika (Katarzyna)", requests.post(f"{BASE}/auth/login",
-     json={"username": "k.nowak", "password": "haslo123"}))
-show("Logowanie technika (Marek)", requests.post(f"{BASE}/auth/login",
-     json={"username": "m.lewandowski", "password": "tech123"}))
+
+r_prac = requests.post(f"{BASE}/auth/login",
+                       json={"username": "k.nowak", "password": "haslo123"})
+show("Logowanie pracownika (Katarzyna)", r_prac)
+
+r_tech = requests.post(f"{BASE}/auth/login",
+                       json={"username": "m.lewandowski", "password": "tech123"})
+show("Logowanie technika (Marek)", r_tech)
+
 show("Bledne haslo zwraca 401", requests.post(f"{BASE}/auth/login",
      json={"username": "k.nowak", "password": "zle"}), expect=401)
+
+if r_prac.status_code != 200 or r_tech.status_code != 200:
+    print("\nLogowanie nie powiodlo sie — czy baza zostala wypelniona (seed.py)?")
+    sys.exit(1)
+
+PRACOWNIK = auth(r_prac.json()["token"])
+TECHNIK = auth(r_tech.json()["token"])
 
 
 section("2. PULPIT (DANE DLA DASHBOARDU)")
 show("Statystyki + rozklad kategorii", requests.get(f"{BASE}/dashboard", headers=TECHNIK))
+show("Odtworzenie sesji z tokenu (/auth/me)", requests.get(f"{BASE}/auth/me", headers=PRACOWNIK))
 
 
 section("3. AUTOMATYCZNA KATEGORYZACJA AI")
@@ -86,12 +101,19 @@ section("6. SCIEZKA AUDYTU (PELNA HISTORIA)")
 show(f"Audit trail zgloszenia #{ticket_id}", requests.get(f"{BASE}/tickets/{ticket_id}/audit", headers=TECHNIK))
 
 
-section("7. KONTROLA UPRAWNIEN (TESTY NEGATYWNE)")
+section("7. KONTROLA UPRAWNIEN I BEZPIECZENSTWO (TESTY NEGATYWNE)")
 show("Pracownik NIE moze zmienic statusu (403)",
      requests.patch(f"{BASE}/tickets/1", headers=PRACOWNIK, json={"status": "Zamkniete"}), expect=403)
 show("Niedozwolone przejscie Nowe -> Zamkniete (400)",
      requests.patch(f"{BASE}/tickets/2", headers=TECHNIK, json={"status": "Zamkniete"}), expect=400)
-show("Brak naglowka X-User-Id (401)", requests.get(f"{BASE}/tickets"), expect=401)
+show("Brak tokenu (401)", requests.get(f"{BASE}/tickets"), expect=401)
+show("Podrobiony token zostaje odrzucony (401)",
+     requests.get(f"{BASE}/tickets", headers=auth("niepoprawny.token.jwt")), expect=401)
+show("Zbyt dlugi tytul zostaje odrzucony (400)",
+     requests.post(f"{BASE}/tickets", headers=PRACOWNIK,
+     json={"title": "x" * 300, "description": "opis"}), expect=400)
+show("Nieznany punkt koncowy API zwraca JSON 404",
+     requests.get(f"{BASE}/nieistniejacy"), expect=404)
 
 
 print("\n" + "=" * 64)
