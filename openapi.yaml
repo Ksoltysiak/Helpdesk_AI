@@ -1,0 +1,693 @@
+openapi: 3.0.3
+
+info:
+  title: Inteligentny HelpDesk IT — API
+  version: "1.0.0"
+  description: |
+    REST API systemu zgłoszeń IT z kontrolą dostępu opartą na rolach (RBAC),
+    automatyczną kategoryzacją AI i pełną ścieżką audytu.
+
+    ## Uwierzytelnianie
+
+    Wszystkie punkty końcowe poza `POST /auth/login` wymagają tokenu JWT
+    w nagłówku:
+
+    ```
+    Authorization: Bearer <token>
+    ```
+
+    Token zwraca operacja logowania. Jest ważny **8 godzin**.
+
+    ## Role i uprawnienia
+
+    | Rola | Uprawnienia |
+    |---|---|
+    | `pracownik` | Tworzy zgłoszenia, widzi **wyłącznie własne** |
+    | `technik` | Widzi wszystkie, zmienia status/kategorię, dodaje notatki, czyta audyt |
+    | `admin` | Pełny dostęp |
+
+    Odpowiedzi dla pracownika są filtrowane po stronie serwera — nie jest to
+    ukrywanie danych w interfejsie, lecz twarda granica dostępu.
+
+    ## Kody błędów
+
+    | Kod | Znaczenie |
+    |---|---|
+    | 400 | Nieprawidłowe dane wejściowe lub niedozwolone przejście statusu |
+    | 401 | Brak tokenu, token wygasły lub nieprawidłowy |
+    | 403 | Token poprawny, ale rola nie pozwala na tę operację |
+    | 404 | Zasób nie istnieje |
+    | 429 | Przekroczony limit prób logowania |
+
+servers:
+  - url: /api
+    description: Ten sam serwer, który serwuje interfejs użytkownika
+
+tags:
+  - name: Uwierzytelnianie
+    description: Logowanie i odtwarzanie sesji
+  - name: Zgłoszenia
+    description: Cykl życia zgłoszenia IT
+  - name: Notatki i audyt
+    description: Notatki techników i historia zmian
+  - name: Pulpit i AI
+    description: Statystyki oraz moduł kategoryzacji
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  # ---------------------------------------------------------------
+  /auth/login:
+    post:
+      tags: [Uwierzytelnianie]
+      summary: Logowanie
+      description: |
+        Zwraca token JWT ważny 8 godzin.
+
+        Operacja jest objęta limitem **10 prób na minutę** i **30 na godzinę**
+        z jednego adresu IP. Po przekroczeniu zwracany jest kod 429.
+
+        Komunikat błędu jest celowo identyczny dla nieprawidłowego hasła
+        i nieistniejącego użytkownika — nie ujawnia, które konta istnieją.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  example: m.lewandowski
+                password:
+                  type: string
+                  format: password
+                  example: tech123
+      responses:
+        "200":
+          description: Zalogowano
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, role, token]
+                properties:
+                  id: { type: integer, example: 4 }
+                  name: { type: string, example: Marek Lewandowski }
+                  role: { $ref: "#/components/schemas/Rola" }
+                  token:
+                    type: string
+                    description: Token JWT do nagłówka Authorization
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        "401":
+          $ref: "#/components/responses/BledneDaneLogowania"
+        "429":
+          $ref: "#/components/responses/ZaWieleZadan"
+
+  # ---------------------------------------------------------------
+  /auth/me:
+    get:
+      tags: [Uwierzytelnianie]
+      summary: Dane zalogowanego użytkownika
+      description: |
+        Służy do odtworzenia sesji po odświeżeniu strony: interfejs
+        przechowuje token i weryfikuje go tutaj, zamiast ufać danym
+        zapisanym w przeglądarce.
+      responses:
+        "200":
+          description: Dane użytkownika przypisanego do tokenu
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, role]
+                properties:
+                  id: { type: integer, example: 1 }
+                  name: { type: string, example: Katarzyna Nowak }
+                  role: { $ref: "#/components/schemas/Rola" }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+
+  # ---------------------------------------------------------------
+  /dashboard:
+    get:
+      tags: [Pulpit i AI]
+      summary: Statystyki i rozkład kategorii
+      description: Dane zbiorcze dla całego systemu (nie są filtrowane wg roli).
+      responses:
+        "200":
+          description: Statystyki
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [statystyki, wg_kategorii]
+                properties:
+                  statystyki:
+                    type: object
+                    required: [otwarte, w_trakcie, rozwiazane, krytyczne]
+                    properties:
+                      otwarte:
+                        type: integer
+                        description: Wszystkie zgłoszenia poza zamkniętymi
+                        example: 15
+                      w_trakcie: { type: integer, example: 5 }
+                      rozwiazane: { type: integer, example: 2 }
+                      krytyczne:
+                        type: integer
+                        description: Priorytet krytyczny, jeszcze niezamknięte
+                        example: 3
+                  wg_kategorii:
+                    type: array
+                    description: Rozkład zgłoszeń wg kategorii, malejąco
+                    items:
+                      type: object
+                      required: [kategoria, liczba]
+                      properties:
+                        kategoria: { $ref: "#/components/schemas/Kategoria" }
+                        liczba: { type: integer, example: 4 }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+
+  # ---------------------------------------------------------------
+  /tickets:
+    get:
+      tags: [Zgłoszenia]
+      summary: Lista zgłoszeń
+      description: |
+        Zakres wyników zależy od roli:
+
+        - **pracownik** — wyłącznie zgłoszenia, których jest autorem;
+          parametry filtrowania są dla niego ignorowane i **nie pozwalają**
+          dosięgnąć cudzych zgłoszeń,
+        - **technik / admin** — wszystkie zgłoszenia, z opcjonalnym filtrowaniem.
+      parameters:
+        - name: status
+          in: query
+          description: Tylko technik/admin
+          schema: { $ref: "#/components/schemas/Status" }
+        - name: priority
+          in: query
+          description: Tylko technik/admin
+          schema: { $ref: "#/components/schemas/Priorytet" }
+        - name: category
+          in: query
+          description: Tylko technik/admin
+          schema: { $ref: "#/components/schemas/Kategoria" }
+      responses:
+        "200":
+          description: Lista zgłoszeń
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [total, tickets]
+                properties:
+                  total:
+                    type: integer
+                    description: Liczba zwróconych zgłoszeń
+                    example: 19
+                  tickets:
+                    type: array
+                    items: { $ref: "#/components/schemas/Zgloszenie" }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+
+    post:
+      tags: [Zgłoszenia]
+      summary: Nowe zgłoszenie
+      description: |
+        Dostępne **wyłącznie dla roli `pracownik`** — technik zgłoszenia
+        obsługuje, a nie składa.
+
+        Po zapisaniu moduł AI nadaje kategorię i priorytet, a na podstawie
+        priorytetu wyliczany jest termin SLA. Obie czynności trafiają do
+        ścieżki audytu.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, description]
+              properties:
+                title:
+                  type: string
+                  maxLength: 200
+                  example: Nie dziala VPN na moim laptopie
+                description:
+                  type: string
+                  maxLength: 5000
+                  example: Od rana nie moge polaczyc sie z firmowym VPN. Blad TLS handshake.
+      responses:
+        "201":
+          description: Zgłoszenie utworzone
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, kategoryzacja_ai, sla_deadline]
+                properties:
+                  id: { type: integer, example: 20 }
+                  kategoryzacja_ai: { $ref: "#/components/schemas/WynikAI" }
+                  sla_deadline:
+                    type: string
+                    format: date-time
+                    example: "2026-08-01T15:30:00"
+        "400":
+          $ref: "#/components/responses/BledneDane"
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+
+  # ---------------------------------------------------------------
+  /tickets/{ticket_id}:
+    parameters:
+      - $ref: "#/components/parameters/TicketId"
+
+    get:
+      tags: [Zgłoszenia]
+      summary: Szczegóły zgłoszenia wraz z notatkami
+      description: |
+        Pracownik może odczytać **wyłącznie własne** zgłoszenie — próba
+        odczytu cudzego kończy się kodem 403.
+
+        Lista notatek również zależy od roli: pracownik widzi tylko notatki
+        jawne (`internal: false`), technik i admin widzą wszystkie.
+      responses:
+        "200":
+          description: Szczegóły zgłoszenia
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Zgloszenie"
+                  - type: object
+                    required: [notes]
+                    properties:
+                      notes:
+                        type: array
+                        items: { $ref: "#/components/schemas/Notatka" }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakDostepuDoZgloszenia"
+        "404":
+          $ref: "#/components/responses/NieZnaleziono"
+
+    patch:
+      tags: [Zgłoszenia]
+      summary: Zmiana statusu, kategorii lub przypisania
+      description: |
+        Wymaga roli `technik` lub `admin`. Należy podać co najmniej jedno
+        z pól — pusty obiekt kończy się kodem 400.
+
+        **Zmiana statusu podlega maszynie stanów.** Dozwolone przejścia:
+
+        ```
+        Nowe → W trakcie → Rozwiazane → Zamkniete
+                      ↘ Wstrzymane ↗
+        ```
+
+        Próba przeskoczenia etapu (np. `Nowe → Zamkniete`) kończy się kodem
+        400 i listą dozwolonych przejść w polu `dozwolone`.
+
+        Efekty uboczne: podjęcie zgłoszenia ze statusu `Nowe` przypisuje je
+        do wywołującego, jeśli nie miało jeszcze opiekuna; przejście do
+        `Zamkniete` ustawia `closed_at`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                status: { $ref: "#/components/schemas/Status" }
+                category: { $ref: "#/components/schemas/Kategoria" }
+                assigned_to:
+                  type: integer
+                  description: Identyfikator technika (musi być liczbą całkowitą)
+                  example: 5
+            examples:
+              podjecie:
+                summary: Podjęcie zgłoszenia
+                value: { status: "W trakcie" }
+              korekta:
+                summary: Ręczna korekta kategoryzacji AI
+                value: { category: "Bezpieczenstwo" }
+      responses:
+        "200":
+          description: Zaktualizowano
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, zaktualizowano]
+                properties:
+                  id: { type: integer, example: 12 }
+                  zaktualizowano:
+                    type: array
+                    description: Nazwy pól, które faktycznie zmieniono
+                    items:
+                      type: string
+                      enum: [status, category, assigned_to]
+                    example: [status]
+        "400":
+          description: Niedozwolone przejście statusu lub nieprawidłowe dane
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }
+                  dozwolone:
+                    type: array
+                    description: Obecny w odpowiedzi przy niedozwolonym przejściu statusu
+                    items: { $ref: "#/components/schemas/Status" }
+              example:
+                error: "Niedozwolona zmiana statusu: Nowe -> Zamkniete"
+                dozwolone: ["W trakcie"]
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+        "404":
+          $ref: "#/components/responses/NieZnaleziono"
+
+  # ---------------------------------------------------------------
+  /tickets/{ticket_id}/notes:
+    parameters:
+      - $ref: "#/components/parameters/TicketId"
+
+    post:
+      tags: [Notatki i audyt]
+      summary: Dodanie notatki
+      description: |
+        Wymaga roli `technik` lub `admin`.
+
+        Notatka domyślnie jest **wewnętrzna** (`internal: true`) — niewidoczna
+        dla zgłaszającego. Aby udostępnić ją pracownikowi, należy jawnie
+        przekazać `internal: false`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  maxLength: 2000
+                  example: Certyfikat VPN wygasl. Odnawiam.
+                internal:
+                  type: boolean
+                  default: true
+                  description: "true = widoczna tylko dla techników"
+      responses:
+        "201":
+          description: Notatka zapisana
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400":
+          $ref: "#/components/responses/BledneDane"
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+        "404":
+          $ref: "#/components/responses/NieZnaleziono"
+
+  # ---------------------------------------------------------------
+  /tickets/{ticket_id}/audit:
+    parameters:
+      - $ref: "#/components/parameters/TicketId"
+
+    get:
+      tags: [Notatki i audyt]
+      summary: Ścieżka audytu zgłoszenia
+      description: |
+        Pełna historia zmian w porządku chronologicznym: utworzenie,
+        kategoryzacja AI, zmiany statusu i kategorii, przypisania, notatki.
+
+        Wymaga roli `technik` lub `admin`. Wpisy wykonane automatycznie
+        (kategoryzacja AI) mają w polu `user` wartość `System AI`.
+      responses:
+        "200":
+          description: Lista wpisów audytu
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/WpisAudytu" }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+
+  # ---------------------------------------------------------------
+  /ai/categorize:
+    post:
+      tags: [Pulpit i AI]
+      summary: Testowe uruchomienie kategoryzacji
+      description: |
+        Zwraca wynik kategoryzacji dla podanego tekstu **bez zapisywania
+        zgłoszenia**. Służy do prezentacji i testowania modułu.
+
+        Wystarczy podać `title` **lub** `description`.
+
+        Gdy tekst pasuje do kilku słów kluczowych naraz, wybierane jest
+        dopasowanie o najwyższym priorytecie — dzięki temu incydent
+        bezpieczeństwa nie zostaje zaklasyfikowany jako rutynowa prośba
+        o reset hasła.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, example: Podejrzany e-mail }
+                description:
+                  type: string
+                  example: Prosba o podanie hasla, wyglada na phishing
+      responses:
+        "200":
+          description: Wynik kategoryzacji
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WynikAI" }
+        "400":
+          $ref: "#/components/responses/BledneDane"
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+
+# ===============================================================
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT (HS256) zwrócony przez `POST /auth/login`, ważny 8 godzin.
+
+  parameters:
+    TicketId:
+      name: ticket_id
+      in: path
+      required: true
+      description: Identyfikator zgłoszenia
+      schema: { type: integer, example: 12 }
+
+  schemas:
+
+    Rola:
+      type: string
+      enum: [pracownik, technik, admin]
+
+    Status:
+      type: string
+      enum: [Nowe, W trakcie, Wstrzymane, Rozwiazane, Zamkniete]
+
+    Priorytet:
+      type: string
+      description: Wyznacza termin SLA — Krytyczny 1 h, Wysoki 4 h, Sredni 8 h, Niski 24 h.
+      enum: [Niski, Sredni, Wysoki, Krytyczny]
+
+    Kategoria:
+      type: string
+      enum:
+        - Sprzet
+        - Oprogramowanie
+        - Siec
+        - Poczta
+        - Konta i dostep
+        - Bezpieczenstwo
+        - Peryferia
+
+    WynikAI:
+      type: object
+      required: [kategoria, priorytet]
+      properties:
+        kategoria: { $ref: "#/components/schemas/Kategoria" }
+        priorytet: { $ref: "#/components/schemas/Priorytet" }
+
+    Zgloszenie:
+      type: object
+      required:
+        - id
+        - title
+        - description
+        - category
+        - priority
+        - status
+        - created_by
+        - assigned_to
+        - ai_categorized
+        - sla_deadline
+        - created_at
+        - updated_at
+        - closed_at
+        - created_by_name
+        - assigned_to_name
+      properties:
+        id: { type: integer, example: 12 }
+        title: { type: string, example: Nie dziala VPN }
+        description: { type: string, example: Blad TLS handshake }
+        category:
+          allOf: [{ $ref: "#/components/schemas/Kategoria" }]
+          nullable: true
+        priority:
+          allOf: [{ $ref: "#/components/schemas/Priorytet" }]
+          nullable: true
+        status: { $ref: "#/components/schemas/Status" }
+        created_by:
+          type: integer
+          description: Identyfikator zgłaszającego
+          example: 1
+        assigned_to:
+          type: integer
+          nullable: true
+          description: Identyfikator przypisanego technika
+          example: 4
+        created_by_name:
+          type: string
+          nullable: true
+          description: Imię i nazwisko zgłaszającego (dołączane przez serwer)
+          example: Katarzyna Nowak
+        assigned_to_name:
+          type: string
+          nullable: true
+          description: Imię i nazwisko przypisanego technika
+          example: Marek Lewandowski
+        ai_categorized:
+          type: boolean
+          description: Czy kategorię nadał moduł AI
+          example: true
+        sla_deadline:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-08-01T15:30:00"
+        created_at: { type: string, format: date-time, example: "2026-07-25T11:40:00" }
+        updated_at: { type: string, format: date-time, example: "2026-07-25T12:05:00" }
+        closed_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+
+    Notatka:
+      type: object
+      required: [author, content, internal, created_at]
+      properties:
+        author: { type: string, example: Marek Lewandowski }
+        content: { type: string, example: Certyfikat VPN wygasl. Odnawiam. }
+        internal:
+          type: boolean
+          description: Notatki wewnętrzne nie są zwracane pracownikowi
+          example: true
+        created_at: { type: string, format: date-time }
+
+    WpisAudytu:
+      type: object
+      required: [action, user, old, new, timestamp]
+      properties:
+        action:
+          type: string
+          example: Zmiana statusu
+        user:
+          type: string
+          description: Osoba wykonująca zmianę lub `System AI` dla działań automatycznych
+          example: Marek Lewandowski
+        old: { type: string, nullable: true, example: Nowe }
+        new: { type: string, nullable: true, example: W trakcie }
+        timestamp: { type: string, format: date-time }
+
+    Blad:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+  responses:
+
+    BledneDane:
+      description: Nieprawidłowe lub niekompletne dane wejściowe
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Blad" }
+          example: { error: "Wymagane pola: title, description" }
+
+    BledneDaneLogowania:
+      description: Nieprawidłowy login lub hasło
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Blad" }
+          example: { error: "Nieprawidlowy login lub haslo" }
+
+    BrakAutoryzacji:
+      description: Brak tokenu, token wygasły lub nieprawidłowy
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Blad" }
+          example: { error: "Wymagana autoryzacja" }
+
+    BrakUprawnien:
+      description: Rola użytkownika nie pozwala na tę operację
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Blad" }
+          example: { error: "Brak uprawnien dla tej operacji" }
+
+    BrakDostepuDoZgloszenia:
+      description: Pracownik próbuje odczytać cudze zgłoszenie
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Blad" }
+          example: { error: "Brak dostepu do tego zgloszenia" }
+
+    NieZnaleziono:
+      description: Zasób o podanym identyfikatorze nie istnieje
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Blad" }
+          example: { error: "Nie znaleziono zgloszenia" }
+
+    ZaWieleZadan:
+      description: Przekroczono limit prób logowania (10/min, 30/h)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Blad" }

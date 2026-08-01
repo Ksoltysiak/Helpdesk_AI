@@ -1,10 +1,15 @@
 from flask import Flask, send_from_directory, jsonify
+from flask_swagger_ui import get_swaggerui_blueprint
 import os
 from db import close_db, init_db, DB_PATH
 from routes import api
 from rate_limit import limiter
 
-FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "frontend")
+BASE_DIR     = os.path.dirname(__file__)
+FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+
+DOCS_URL = "/api/docs"
+SPEC_URL = "/api/openapi.yaml"
 
 
 def create_app():
@@ -12,6 +17,17 @@ def create_app():
     app.register_blueprint(api, url_prefix="/api")
     app.teardown_appcontext(close_db)
     limiter.init_app(app)
+
+    # Interaktywna dokumentacja API. Pliki Swagger UI sa dolaczone do paczki
+    # (bez CDN) — dzialaja offline i nie wymagaja luzniejszej polityki CSP.
+    app.register_blueprint(
+        get_swaggerui_blueprint(DOCS_URL, SPEC_URL, config={"app_name": "HelpDesk IT — API"}),
+        url_prefix=DOCS_URL,
+    )
+
+    @app.route(SPEC_URL)
+    def openapi_spec():
+        return send_from_directory(BASE_DIR, "openapi.yaml", mimetype="application/yaml")
 
     @app.after_request
     def security_headers(response):
@@ -22,7 +38,7 @@ def create_app():
             "default-src 'self'; "
             "script-src 'self' https://unpkg.com 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-            "font-src https://fonts.gstatic.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data:; "
             "connect-src 'self'"
         )

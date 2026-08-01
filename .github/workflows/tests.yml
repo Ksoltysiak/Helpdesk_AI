@@ -62,4 +62,7 @@ jobs:
           done
           curl -sf http://127.0.0.1:5000/ >/dev/null
           docker exec helpdesk whoami | grep -qx app  # nie moze dzialac jako root
+          # Dokumentacja API musi byc czescia obrazu, nie tylko repozytorium.
+          curl -sf http://127.0.0.1:5000/api/openapi.yaml | grep -q "openapi:"
+          curl -sf http://127.0.0.1:5000/api/docs/ >/dev/null
           docker rm -f helpdesk

@@ -7,12 +7,12 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
 
 | Miara | Wartość |
 |---|---|
-| Testy `pytest` | **139** (36 jednostkowych + 103 integracyjne) |
+| Testy `pytest` | **166** (36 jednostkowych + 130 integracyjnych) |
 | Testy E2E (`demo.py`) | **21** sprawdzeń |
-| Łącznie automatycznych sprawdzeń | **160** |
-| Pokrycie kodu aplikacji | **100%** (299 instrukcji, 0 pominiętych) |
-| Czas wykonania `pytest` | ~10 s |
-| Wynik ostatniego przebiegu | 139 passed, 0 failed |
+| Łącznie automatycznych sprawdzeń | **187** |
+| Pokrycie kodu aplikacji | **100%** (307 instrukcji, 0 pominiętych) |
+| Czas wykonania `pytest` | ~12 s |
+| Wynik ostatniego przebiegu | 166 passed, 0 failed |
 
 ---
 
@@ -38,11 +38,11 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
                     │   E2E — demo.py       │   21 sprawdzeń
                     │   działający serwer   │   ~3 s
                     ├───────────────────────┤
-                │      Integracyjne         │   103 testy
-                │   Flask + baza danych     │   ~9 s
+                │      Integracyjne         │   130 testów
+                │   Flask + baza danych     │   ~11 s
             ├───────────────────────────────────┤
         │          Jednostkowe                  │   36 testów
-        │      czysta logika, bez I/O           │   ~0,3 s
+        │      czysta logika, bez I/O           │   ~0,4 s
     └───────────────────────────────────────────────┘
 ```
 
@@ -54,6 +54,7 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
 | Integracyjna | `tests/test_api_auth.py` | 28 | Logowanie, ochrona endpointów |
 | Integracyjna | `tests/test_api_tickets.py` | 59 | RBAC, CRUD, notatki, audyt |
 | Integracyjna | `tests/test_api_security.py` | 16 | Nagłówki, 404 API, limit żądań |
+| Integracyjna | `tests/test_openapi.py` | 27 | Zgodność dokumentacji z implementacją |
 | E2E | `demo.py` | 21 | Pełny przepływ przez HTTP |
 
 **Uwaga o kształcie piramidy.** Warstwa integracyjna jest tu liczniejsza niż
@@ -116,6 +117,25 @@ API), brak CORS z gwiazdką, poprawna obsługa nieznanych ścieżek `/api/*`,
 serwowanie frontendu i plików statycznych oraz ograniczanie liczby prób
 logowania (429 po przekroczeniu limitu, przy jednoczesnym braku wpływu na zwykłe
 odczyty).
+
+**`test_openapi.py`** — testy zgodności dokumentacji z kodem. Dokumentacja
+pisana ręcznie rozjeżdża się z implementacją; w tym projekcie zdarzyło się to
+już raz (README opisywał nagłówek `X-User-Id` długo po przejściu na JWT). Te
+testy sprawiają, że rozjazd kończy się czerwonym testem, a nie cicho mylącą
+dokumentacją. Sprawdzane jest, że:
+
+- każda zarejestrowana trasa `/api/*` ma wpis w specyfikacji **i odwrotnie**,
+  wraz ze zgodnością metod HTTP,
+- listy wartości (`Status`, `Kategoria`, `Priorytet`, `Rola`) odpowiadają
+  stałym w kodzie — odpowiednio `TRANSITIONS`, `CATEGORIES`, `SLA_HOURS`
+  i warunkowi `CHECK` w schemacie bazy,
+- schematy odpowiedzi (`Zgloszenie`, `Notatka`, `WpisAudytu`, `WynikAI`)
+  mają **dokładnie** te pola, które zwraca działające API,
+- udokumentowane limity długości są tymi samymi, które egzekwuje kod,
+- tylko logowanie jest publiczne — każda inna operacja dziedziczy wymóg tokenu,
+- wszystkie odwołania `$ref` wskazują istniejące elementy,
+- skrócona tabela endpointów w `README.md` zgadza się ze specyfikacją,
+- interaktywna dokumentacja odpowiada i nie korzysta z zewnętrznego CDN.
 
 ---
 
@@ -214,6 +234,23 @@ Po każdej próbie pliki źródłowe przywrócono do stanu zgodnego z repozytori
 (zweryfikowane poleceniem `git status`). Wszystkie trzy mutacje zostały
 wykryte — testy pilnują tych zachowań realnie, a nie pozornie.
 
+### Weryfikacja testów zgodności dokumentacji
+
+Tę samą metodę zastosowano do testów z `test_openapi.py`, symulując typowe
+zmiany wprowadzane przez zespół:
+
+| # | Symulowana zmiana | Wynik |
+|---|---|---|
+| A | Dodanie endpointu `POST /tickets/{id}/eskalacja` bez wpisu w specyfikacji | **2 testy nie przeszły** — brak dokumentacji trasy oraz rozjazd metod |
+| B | Dodanie kategorii `Telefonia` w `ai.py` bez aktualizacji specyfikacji | **1 test nie przeszedł** — lista kategorii |
+| C | Dodanie pola `priorytet_sla` do odpowiedzi API bez aktualizacji schematu | **2 testy nie przeszły** — schemat listy i szczegółów |
+| D | Zmiana limitu `_TITLE_MAX` z 200 na 120 bez poprawienia dokumentacji | **1 test nie przeszedł** — udokumentowane limity długości |
+| E | Usunięcie wiersza `GET /auth/me` z tabeli w `README.md` | **1 test nie przeszedł** — z komunikatem `tylko w openapi.yaml: [('get', '/auth/me')]` |
+
+Każdy przypadek został wychwycony, a komunikat błędu wskazuje konkretną
+rozbieżność. Oznacza to, że dokumentacja **nie może** po cichu zdezaktualizować
+się względem kodu — próba scalenia takiej zmiany zatrzyma się na CI.
+
 ---
 
 ## Testy regresji dla wykrytych błędów
@@ -227,6 +264,7 @@ wrócić. W kodzie testów opatrzono je komentarzem wyjaśniającym przyczynę.
 | Nieznane ścieżki `/api/*` zwracały stronę HTML z kodem 200 | `test_api_security.py::test_nieznany_endpoint_api_zwraca_json_404` (4 przypadki) |
 | Nagłówek `X-User-Id` pozwalał podszyć się pod dowolnego użytkownika | `test_api_auth.py::test_niepoprawny_naglowek_autoryzacji_daje_401` |
 | Hasła przechowywane otwartym tekstem | `test_api_auth.py::test_haslo_jest_hashowane_w_bazie` |
+| Dokumentacja opisywała `X-User-Id` długo po przejściu na JWT | `test_openapi.py` — cały zestaw testów zgodności |
 
 ---
 

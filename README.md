@@ -28,7 +28,8 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 
 | Plik                 | Odpowiada za                                              |
 |-----------------------|------------------------------------------------------------|
-| `app.py`              | Punkt startowy, nagłówki bezpieczeństwa, serwowanie frontendu |
+| `app.py`              | Punkt startowy, nagłówki bezpieczeństwa, serwowanie frontendu i dokumentacji |
+| `openapi.yaml`        | Specyfikacja API (OpenAPI 3.0) — źródło prawdy dla dokumentacji |
 | `db.py`               | Schemat bazy danych, połączenie, zapis audytu              |
 | `auth.py`             | JWT, generowanie/weryfikacja tokenów, dekoratory RBAC      |
 | `rate_limit.py`       | Instancja Flask-Limiter (ograniczanie żądań)               |
@@ -95,8 +96,8 @@ py app.py                     # startuje serwer na http://127.0.0.1:5000
 
 ## Testy
 
-Projekt ma zestaw **160 automatycznych sprawdzeń** w trzech warstwach
-(139 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
+Projekt ma zestaw **187 automatycznych sprawdzeń** w trzech warstwach
+(166 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
 
 ```bash
 py -m pip install -r requirements-dev.txt
@@ -106,7 +107,7 @@ py -m pytest
 | Warstwa | Liczba | Zakres |
 |---|---|---|
 | Jednostkowe | 36 | Kategoryzacja AI, tokeny JWT, maszyna stanów |
-| Integracyjne | 103 | Flask + baza: RBAC, walidacja, nagłówki, limit żądań |
+| Integracyjne | 130 | Flask + baza: RBAC, walidacja, nagłówki, limit żądań, zgodność dokumentacji |
 | E2E (`demo.py`) | 21 | Pełny przepływ przez działający serwer |
 
 Testy uruchamiają się automatycznie przy każdym pull requeście
@@ -181,6 +182,16 @@ i ustaw go jako zmienną środowiskową przed uruchomieniem.
 ---
 
 ## Punkty końcowe API
+
+**Pełna, interaktywna dokumentacja:** po uruchomieniu aplikacji dostępna pod
+adresem **`http://localhost:5000/api/docs`** (Swagger UI). Można z niej wysyłać
+prawdziwe żądania — wystarczy zalogować się przez `POST /auth/login`, skopiować
+token i wkleić go przyciskiem **Authorize**.
+
+Źródłem prawdy jest plik **[`openapi.yaml`](openapi.yaml)** (OpenAPI 3.0),
+serwowany również pod `/api/openapi.yaml`. Poniższa tabela to skrót
+orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
+(`tests/test_openapi.py`).
 
 | Metoda | Ścieżka                   | Rola          | Opis                                      |
 |--------|----------------------------|---------------|---------------------------------------------|
