@@ -1,0 +1,4 @@
+# Zaleznosci wylacznie do testow — nie trafiaja do obrazu produkcyjnego.
+-r requirements.txt
+pytest==8.3.3
+pytest-cov==5.0.0

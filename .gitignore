@@ -3,3 +3,8 @@ __pycache__/
 helpdesk.db
 .env
 data/
+
+# Artefakty testow
+.pytest_cache/
+.coverage
+htmlcov/

@@ -1,0 +1,65 @@
+name: Testy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  testy:
+    name: Testy jednostkowe, integracyjne i E2E
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalacja zaleznosci
+        run: pip install -r requirements-dev.txt
+
+      # Warstwy 1 i 2 piramidy — bez uruchamiania serwera.
+      - name: Testy jednostkowe i integracyjne
+        env:
+          SECRET_KEY: klucz-tylko-do-testow-ci
+        run: pytest --cov --cov-report=term-missing
+
+      # Warstwa 3 — pelny przeplyw przez dzialajacy serwer.
+      - name: Testy E2E przy dzialajacym serwerze
+        env:
+          SECRET_KEY: klucz-tylko-do-testow-ci
+          DB_PATH: /tmp/ci-helpdesk.db
+        run: |
+          python seed.py
+          gunicorn --bind 127.0.0.1:5000 app:app --daemon
+          for _ in $(seq 30); do
+            curl -sf http://127.0.0.1:5000/ >/dev/null && break
+            sleep 1
+          done
+          python demo.py
+
+  obraz-docker:
+    name: Budowa obrazu Docker
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Budowa obrazu
+        run: docker build -t helpdesk-test .
+
+      - name: Kontener startuje i odpowiada
+        run: |
+          docker run -d --name helpdesk -p 5000:5000 \
+            -e SECRET_KEY=klucz-tylko-do-testow-ci helpdesk-test
+          for _ in $(seq 30); do
+            curl -sf http://127.0.0.1:5000/ >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:5000/ >/dev/null
+          docker exec helpdesk whoami | grep -qx app  # nie moze dzialac jako root
+          docker rm -f helpdesk

@@ -1,0 +1,15 @@
+[run]
+source = .
+omit =
+    tests/*
+    # Skrypty uruchamiane recznie, nie kod aplikacji:
+    # demo.py to warstwa E2E (uruchamiana osobno, przy dzialajacym serwerze),
+    # seed.py sluzy do wypelnienia bazy danymi startowymi.
+    demo.py
+    seed.py
+
+[report]
+show_missing = True
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:

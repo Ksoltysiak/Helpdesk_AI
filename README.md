@@ -12,6 +12,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 - [Struktura plików](#struktura-plików)
 - [Szybki start (Docker)](#szybki-start-docker)
 - [Szybki start (lokalnie, bez Dockera)](#szybki-start-lokalnie-bez-dockera)
+- [Testy](#testy)
 - [Weryfikacja działania](#weryfikacja-działania)
 - [Bezpieczeństwo](#bezpieczeństwo)
 - [Role użytkowników](#role-użytkowników)
@@ -34,7 +35,9 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 | `ai.py`               | Automatyczna kategoryzacja zgłoszeń                        |
 | `routes.py`           | Wszystkie punkty końcowe API                               |
 | `seed.py`             | Wypełnienie bazy danymi testowymi (hasła hashowane)        |
-| `demo.py`             | Skrypt sprawdzający — weryfikuje całe API                  |
+| `demo.py`             | Skrypt sprawdzający E2E — weryfikuje całe API              |
+| `tests/`              | Testy jednostkowe i integracyjne (`pytest`)                |
+| `requirements-dev.txt`| Zależności potrzebne wyłącznie do testów                   |
 | `Dockerfile`          | Obraz kontenera, uruchomienie jako użytkownik bez uprawnień root |
 | `docker-compose.yml`  | Uruchomienie usługi z trwałym wolumenem i wymaganym SECRET_KEY |
 | `.env.example`        | Szablon zmiennych środowiskowych                           |
@@ -87,6 +90,30 @@ py -m pip install -r requirements.txt
 py seed.py                    # tworzy i wypełnia bazę danymi testowymi
 py app.py                     # startuje serwer na http://127.0.0.1:5000
 ```
+
+---
+
+## Testy
+
+Projekt ma zestaw **160 automatycznych sprawdzeń** w trzech warstwach
+(139 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
+
+```bash
+py -m pip install -r requirements-dev.txt
+py -m pytest
+```
+
+| Warstwa | Liczba | Zakres |
+|---|---|---|
+| Jednostkowe | 36 | Kategoryzacja AI, tokeny JWT, maszyna stanów |
+| Integracyjne | 103 | Flask + baza: RBAC, walidacja, nagłówki, limit żądań |
+| E2E (`demo.py`) | 21 | Pełny przepływ przez działający serwer |
+
+Testy uruchamiają się automatycznie przy każdym pull requeście
+(`.github/workflows/tests.yml`).
+
+Pełny opis — zakres każdej warstwy, raport pokrycia, weryfikacja mutacyjna
+i znane ograniczenia — znajduje się w pliku **[TESTING.md](TESTING.md)**.
 
 ---
 
