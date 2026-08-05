@@ -95,7 +95,7 @@ def test_brak_secret_key_ostrzega_i_nie_przechodzi_bezszelestnie():
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env = {k: v for k, v in os.environ.items() if k != "SECRET_KEY"}
-    env["PYTHONPATH"] = root
+    env["PYTHONPATH"] = os.path.join(root, "backend")
 
     wynik = subprocess.run(
         [sys.executable, "-W", "always", "-c", "import auth; print(auth.SECRET_KEY)"],
