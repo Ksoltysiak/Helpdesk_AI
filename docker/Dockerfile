@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 COPY frontend/ frontend/
 COPY docker/docker-entrypoint.sh .
+COPY openapi.yaml .
 
 RUN addgroup --system app && adduser --system --ingroup app app \
     && mkdir -p /app/data \

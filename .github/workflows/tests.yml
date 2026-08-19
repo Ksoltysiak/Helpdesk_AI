@@ -34,13 +34,13 @@ jobs:
           SECRET_KEY: klucz-tylko-do-testow-ci
           DB_PATH: /tmp/ci-helpdesk.db
         run: |
-          python seed.py
-          gunicorn --bind 127.0.0.1:5000 app:app --daemon
+          python backend/seed.py
+          gunicorn --bind 127.0.0.1:5000 --chdir backend app:app --daemon
           for _ in $(seq 30); do
-            curl -sf http://127.0.0.1:5000/ >/dev/null && break
+            curl -sf http://127.0.0.1:5000/health >/dev/null && break
             sleep 1
           done
-          python demo.py
+          python scripts/demo.py
 
   obraz-docker:
     name: Budowa obrazu Docker
@@ -50,17 +50,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Budowa obrazu
-        run: docker build -t helpdesk-test .
+        run: docker build -t helpdesk-test -f docker/Dockerfile .
 
       - name: Kontener startuje i odpowiada
         run: |
           docker run -d --name helpdesk -p 5000:5000 \
             -e SECRET_KEY=klucz-tylko-do-testow-ci helpdesk-test
           for _ in $(seq 30); do
-            curl -sf http://127.0.0.1:5000/ >/dev/null && break
+            curl -sf http://127.0.0.1:5000/health >/dev/null && break
             sleep 1
           done
-          curl -sf http://127.0.0.1:5000/ >/dev/null
+          curl -sf http://127.0.0.1:5000/health >/dev/null
           docker exec helpdesk whoami | grep -qx app  # nie moze dzialac jako root
           # Dokumentacja API musi byc czescia obrazu, nie tylko repozytorium.
           curl -sf http://127.0.0.1:5000/api/openapi.yaml | grep -q "openapi:"
