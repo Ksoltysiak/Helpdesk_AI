@@ -66,8 +66,15 @@ paths:
       description: |
         Zwraca token JWT ważny 8 godzin.
 
-        Operacja jest objęta limitem **10 prób na minutę** i **30 na godzinę**
-        z jednego adresu IP. Po przekroczeniu zwracany jest kod 429.
+        Obowiązują **dwa limity jednocześnie**:
+
+        - **10/min i 30/h na adres IP** — ogranicza masowe próby z jednego źródła,
+        - **5/min i 20/h na konto** (adres IP + nazwa użytkownika) — ogranicza
+          zgadywanie hasła do konkretnego konta także z wielu adresów.
+
+        Po przekroczeniu któregokolwiek zwracany jest kod 429. Świadomie **nie**
+        stosujemy blokady konta po N próbach — napastnik mógłby wtedy celowo
+        odciąć dostęp prawdziwym użytkownikom.
 
         Komunikat błędu jest celowo identyczny dla nieprawidłowego hasła
         i nieistniejącego użytkownika — nie ujawnia, które konta istnieją.
@@ -645,11 +652,23 @@ components:
   responses:
 
     BledneDane:
-      description: Nieprawidłowe lub niekompletne dane wejściowe
+      description: |
+        Nieprawidłowe lub niekompletne dane wejściowe — brak wymaganego pola,
+        przekroczona długość albo **nieprawidłowy typ** (pole tekstowe musi być
+        tekstem; liczba lub obiekt kończą się kodem 400, nie 500).
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Blad" }
-          example: { error: "Wymagane pola: title, description" }
+          examples:
+            brak_pola:
+              summary: Brak wymaganego pola
+              value: { error: "Pole 'title' jest wymagane" }
+            zly_typ:
+              summary: Nieprawidłowy typ
+              value: { error: "Pole 'title' musi byc tekstem" }
+            za_dlugie:
+              summary: Przekroczona długość
+              value: { error: "Pole 'title' jest za dlugie (max 200 znakow)" }
 
     BledneDaneLogowania:
       description: Nieprawidłowy login lub hasło

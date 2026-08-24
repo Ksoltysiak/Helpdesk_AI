@@ -8,6 +8,10 @@ services:
     environment:
       - DB_PATH=/app/data/helpdesk.db
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY env var before starting}
+      # Opcjonalne — opis w .env.example. Puste = wylaczone.
+      - FORCE_HTTPS=${FORCE_HTTPS:-}
+      - TRUST_PROXY=${TRUST_PROXY:-}
+      - RATELIMIT_STORAGE_URI=${RATELIMIT_STORAGE_URI:-}
 
 volumes:
   helpdesk-data:

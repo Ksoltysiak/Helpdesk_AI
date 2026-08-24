@@ -23,7 +23,8 @@ def _decode(token, key=None):
 # ---------------------------------------------------------------
 
 def test_token_zawiera_identyfikator_uzytkownika():
-    assert _decode(auth.generate_token(42))["sub"] == 42
+    """RFC 7519 wymaga, by 'sub' bylo tekstem — PyJWT to egzekwuje."""
+    assert _decode(auth.generate_token(42))["sub"] == "42"
 
 
 def test_token_ma_date_wystawienia_i_wygasniecia():
@@ -45,7 +46,13 @@ def test_tokeny_roznych_uzytkownikow_sa_rozne():
 # ---------------------------------------------------------------
 
 def test_token_podpisany_innym_kluczem_jest_odrzucany():
-    obcy = jwt.encode({"sub": 1, "exp": int(time.time()) + 3600}, "inny-klucz", algorithm="HS256")
+    # Klucz o pelnej dlugosci — testujemy odrzucenie obcego podpisu,
+    # a nie ostrzezenie o zbyt krotkim kluczu.
+    obcy = jwt.encode(
+        {"sub": "1", "exp": int(time.time()) + 3600},
+        "inny-klucz-o-dlugosci-co-najmniej-32-bajtow",
+        algorithm="HS256",
+    )
     with pytest.raises(jwt.InvalidTokenError):
         _decode(obcy)
 

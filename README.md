@@ -30,6 +30,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 |-----------------------|------------------------------------------------------------|
 | `app.py`              | Punkt startowy, nagłówki bezpieczeństwa, serwowanie frontendu i dokumentacji |
 | `openapi.yaml`        | Specyfikacja API (OpenAPI 3.0) — źródło prawdy dla dokumentacji |
+| `SECURITY.md`         | Audyt bezpieczeństwa — weryfikacja 20 zabezpieczeń |
 | `db.py`               | Schemat bazy danych, połączenie, zapis audytu              |
 | `auth.py`             | JWT, generowanie/weryfikacja tokenów, dekoratory RBAC      |
 | `rate_limit.py`       | Instancja Flask-Limiter (ograniczanie żądań)               |
@@ -96,8 +97,8 @@ py app.py                     # startuje serwer na http://127.0.0.1:5000
 
 ## Testy
 
-Projekt ma zestaw **187 automatycznych sprawdzeń** w trzech warstwach
-(166 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
+Projekt ma zestaw **250 automatycznych sprawdzeń** w trzech warstwach
+(229 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
 
 ```bash
 py -m pip install -r requirements-dev.txt
@@ -107,7 +108,7 @@ py -m pytest
 | Warstwa | Liczba | Zakres |
 |---|---|---|
 | Jednostkowe | 36 | Kategoryzacja AI, tokeny JWT, maszyna stanów |
-| Integracyjne | 130 | Flask + baza: RBAC, walidacja, nagłówki, limit żądań, zgodność dokumentacji |
+| Integracyjne | 193 | Flask + baza: RBAC, walidacja typów, nagłówki, limity, HTTPS, zgodność dokumentacji |
 | E2E (`demo.py`) | 21 | Pełny przepływ przez działający serwer |
 
 Testy uruchamiają się automatycznie przy każdym pull requeście
@@ -115,6 +116,7 @@ Testy uruchamiają się automatycznie przy każdym pull requeście
 
 Pełny opis — zakres każdej warstwy, raport pokrycia, weryfikacja mutacyjna
 i znane ograniczenia — znajduje się w pliku **[TESTING.md](TESTING.md)**.
+Wyniki audytu bezpieczeństwa: **[SECURITY.md](SECURITY.md)**.
 
 ---
 
@@ -155,19 +157,35 @@ curl http://localhost:5000/api/dashboard \
 | Mechanizm | Implementacja |
 |-----------|---------------|
 | Hashowanie haseł | `werkzeug` scrypt — brak plaintext w bazie |
-| Uwierzytelnianie | JWT (HS256, ważność 8h) — podpisane tokeny, nie do podrobienia |
-| Ograniczanie żądań | Flask-Limiter: 10 prób/min, 30/h na endpoincie logowania |
-| Nagłówki HTTP | `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Content-Security-Policy` |
+| Uwierzytelnianie | JWT (HS256, ważność 8h) — weryfikowane po stronie serwera przy każdym żądaniu |
+| Klucz podpisujący | `SECRET_KEY` wymagany; ostrzeżenie przy kluczu krótszym niż 32 bajty |
+| Izolacja danych | Pracownik widzi wyłącznie własne zgłoszenia — filtrowanie w zapytaniu SQL, nie w interfejsie |
+| Ochrona przed IDOR | Odczyt cudzego zgłoszenia kończy się kodem 403 |
+| Manipulacja polami | Status, priorytet, kategoria i autor ustawiane wyłącznie po stronie serwera |
+| Ograniczanie żądań | Dwa limity: 10/min na adres IP **oraz** 5/min na konto (chroni przed rozproszonym zgadywaniem hasła) |
+| Zapytania SQL | Wyłącznie parametryzowane — brak sklejania wartości |
+| Walidacja wejścia | Sprawdzanie typu i długości; nieprawidłowe dane dają 400 w JSON, nigdy 500 |
+| Escapowanie treści | Dane użytkownika renderowane przez `escHtml()` — zweryfikowane testem XSS |
+| Nagłówki HTTP | `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Content-Security-Policy`, `Permissions-Policy`, `Strict-Transport-Security` (przy HTTPS) |
+| HTTPS | Przekierowanie 308 + HSTS po ustawieniu `FORCE_HTTPS=1` |
 | CORS | Brak — frontend serwowany z tego samego serwera (same-origin) |
-| Docker | Proces gunicorn działa jako systemowy użytkownik bez uprawnień root |
-| Walidacja wejścia | Limity długości: tytuł ≤ 200, opis ≤ 5000, notatka ≤ 2000 znaków |
-| Klucz tajny | `SECRET_KEY` wymagany jako zmienna środowiskowa — compose odmawia startu bez niego |
+| Ciasteczka | Nieużywane — brak sesji serwerowej, token w `sessionStorage` |
+| Odpowiedzi błędów | Zawsze JSON dla `/api/*`; treść wyjątku nigdy nie trafia do klienta |
+| Docker | Proces gunicorn działa jako użytkownik bez uprawnień root |
+| Zależności | `pip-audit` w CI + Dependabot (pip, Docker, GitHub Actions) |
 
 **Wymaganie produkcyjne:** wygeneruj `SECRET_KEY` poleceniem:
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
-i ustaw go jako zmienną środowiskową przed uruchomieniem.
+
+**Przy wdrożeniu za HTTPS/proxy** ustaw dodatkowo (opis w `.env.example`):
+
+| Zmienna | Kiedy włączyć |
+|---|---|
+| `FORCE_HTTPS=1` | Gdy aplikacja ma certyfikat TLS — włącza przekierowanie i HSTS |
+| `TRUST_PROXY=1` | **Tylko** za odwrotnym proxy — inaczej `X-Forwarded-For` można podrobić i obejść limity |
+| `RATELIMIT_STORAGE_URI` | Przy `--workers > 1` — bez wspólnego magazynu każdy proces liczy limit osobno |
 
 ---
 

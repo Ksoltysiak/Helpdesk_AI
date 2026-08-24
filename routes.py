@@ -5,7 +5,7 @@ import json
 from db import get_db, log_audit
 from auth import login_required, roles_required, generate_token
 from ai import categorize, CATEGORIES, SLA_HOURS
-from rate_limit import limiter
+from rate_limit import limiter, klucz_logowania
 
 api = Blueprint("api", __name__)
 
@@ -20,6 +20,24 @@ TRANSITIONS = {
 _TITLE_MAX = 200
 _DESC_MAX  = 5000
 _NOTE_MAX  = 2000
+
+
+def pole_tekstowe(dane, nazwa, maks):
+    """Zwraca (wartosc, blad) dla pola tekstowego z zadania.
+
+    Klient moze przyslac dowolny JSON, wiec typ trzeba sprawdzic przed
+    wywolaniem len() i przed przekazaniem wartosci do sterownika bazy —
+    inaczej liczba lub obiekt konczy sie wyjatkiem i odpowiedzia HTTP 500.
+    """
+    wartosc = dane.get(nazwa, "")
+    if not isinstance(wartosc, str):
+        return None, f"Pole '{nazwa}' musi byc tekstem"
+    wartosc = wartosc.strip()
+    if not wartosc:
+        return None, f"Pole '{nazwa}' jest wymagane"
+    if len(wartosc) > maks:
+        return None, f"Pole '{nazwa}' jest za dlugie (max {maks} znakow)"
+    return wartosc, None
 
 
 def serialize(t):
@@ -57,7 +75,8 @@ _TICKET_SELECT = """
 
 
 @api.route("/auth/login", methods=["POST"])
-@limiter.limit("10 per minute; 30 per hour")
+@limiter.limit("10 per minute; 30 per hour")                              # na adres IP
+@limiter.limit("5 per minute; 20 per hour", key_func=klucz_logowania)     # na konto
 def login():
     data     = request.get_json(silent=True) or {}
     username = data.get("username", "")
@@ -130,16 +149,14 @@ def list_tickets():
 @api.route("/tickets", methods=["POST"])
 @roles_required("pracownik")
 def create_ticket():
-    data        = request.get_json(silent=True) or {}
-    title       = data.get("title", "")
-    description = data.get("description", "")
+    data = request.get_json(silent=True) or {}
 
-    if not title or not description:
-        return jsonify({"error": "Wymagane pola: title, description"}), 400
-    if len(title) > _TITLE_MAX:
-        return jsonify({"error": f"Tytul za dlugi (max {_TITLE_MAX} znakow)"}), 400
-    if len(description) > _DESC_MAX:
-        return jsonify({"error": f"Opis za dlugi (max {_DESC_MAX} znakow)"}), 400
+    title, blad = pole_tekstowe(data, "title", _TITLE_MAX)
+    if blad:
+        return jsonify({"error": blad}), 400
+    description, blad = pole_tekstowe(data, "description", _DESC_MAX)
+    if blad:
+        return jsonify({"error": blad}), 400
 
     db        = get_db()
     ticket_id = db.execute(
@@ -248,13 +265,11 @@ def update_ticket(ticket_id):
 @api.route("/tickets/<int:ticket_id>/notes", methods=["POST"])
 @roles_required("technik", "admin")
 def add_note(ticket_id):
-    data    = request.get_json(silent=True) or {}
-    content = data.get("content", "")
+    data = request.get_json(silent=True) or {}
 
-    if not content:
-        return jsonify({"error": "Wymagane pole: content"}), 400
-    if len(content) > _NOTE_MAX:
-        return jsonify({"error": f"Notatka za dluga (max {_NOTE_MAX} znakow)"}), 400
+    content, blad = pole_tekstowe(data, "content", _NOTE_MAX)
+    if blad:
+        return jsonify({"error": blad}), 400
 
     db = get_db()
     if not db.execute("SELECT 1 FROM tickets WHERE id = ?", (ticket_id,)).fetchone():
@@ -290,6 +305,8 @@ def ai_categorize():
     data        = request.get_json(silent=True) or {}
     title       = data.get("title", "")
     description = data.get("description", "")
+    if not isinstance(title, str) or not isinstance(description, str):
+        return jsonify({"error": "Pola 'title' i 'description' musza byc tekstem"}), 400
     if not title and not description:
         return jsonify({"error": "Podaj pole title lub description"}), 400
     return jsonify(categorize(title, description))

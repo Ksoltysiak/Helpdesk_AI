@@ -42,6 +42,24 @@ jobs:
           done
           python demo.py
 
+  bezpieczenstwo-zaleznosci:
+    name: Skanowanie zaleznosci
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Sprawdza zainstalowane pakiety wzgledem bazy podatnosci PyPI.
+      - name: Znane podatnosci w zaleznosciach (pip-audit)
+        run: |
+          pip install pip-audit
+          pip install -r requirements.txt
+          pip-audit --strict --desc
+
   obraz-docker:
     name: Budowa obrazu Docker
     runs-on: ubuntu-latest

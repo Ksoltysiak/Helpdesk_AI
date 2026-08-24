@@ -1,0 +1,27 @@
+version: 2
+
+updates:
+  # Zaleznosci Pythona — aktualizacje bezpieczenstwa i wersji bibliotek.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+
+  # Obraz bazowy w Dockerfile (python:3.12-slim).
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(docker)"
+
+  # Wersje akcji uzywanych w workflow CI.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(ci)"

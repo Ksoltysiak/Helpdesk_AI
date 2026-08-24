@@ -2,6 +2,8 @@
 nieznanych sciezek, ograniczanie liczby zadan i serwowanie frontendu.
 """
 
+import re
+
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -32,6 +34,33 @@ def test_naglowki_obowiazuja_takze_dla_api(client, technik):
 def test_brak_wildcard_cors(client):
     """Frontend jest serwowany z tego samego zrodla — CORS jest zbedny."""
     assert "Access-Control-Allow-Origin" not in client.get("/api/tickets").headers
+
+
+@pytest.mark.parametrize("dyrektywa", [
+    "object-src 'none'",       # blokuje wtyczki i osadzone obiekty
+    "base-uri 'self'",         # uniemozliwia przekierowanie sciezek wzglednych
+    "frame-ancestors 'none'",  # clickjacking, takze dla przegladarek bez X-Frame-Options
+    "form-action 'self'",      # formularz nie wysle danych na obcy serwer
+])
+def test_csp_zawiera_dyrektywy_ograniczajace(client, dyrektywa):
+    assert dyrektywa in client.get("/").headers.get("Content-Security-Policy", "")
+
+
+def test_csp_nie_zezwala_na_skrypty_z_cdn(client):
+    """Skrypty tylko z wlasnego serwera — zaden obcy host nie jest dozwolony."""
+    csp = client.get("/").headers.get("Content-Security-Policy", "")
+    script_src = [c for c in csp.split(";") if c.strip().startswith("script-src")][0]
+    for host in ("unpkg.com", "cdn.jsdelivr.net", "cdnjs.cloudflare.com", "*"):
+        assert host not in script_src
+
+
+def test_frontend_nie_laduje_skryptow_z_obcych_serwerow(client):
+    """Obcy skrypt wykonuje sie z pelnymi uprawnieniami strony — takze
+    z dostepem do tokenu w sessionStorage. Zaden nie moze wrocic niepostrzezenie."""
+    strona = client.get("/").get_data(as_text=True)
+    skrypty = re.findall(r'<script[^>]+src=["\']([^"\']+)["\']', strona)
+    zewnetrzne = [s for s in skrypty if s.startswith(("http://", "https://", "//"))]
+    assert not zewnetrzne, f"Frontend laduje obce skrypty: {zewnetrzne}"
 
 
 # ---------------------------------------------------------------
@@ -86,7 +115,12 @@ def test_nieznana_sciezka_poza_api_zwraca_aplikacje(client):
 # ---------------------------------------------------------------
 
 def test_powtarzane_proby_logowania_sa_blokowane(rate_limited_client):
-    """Po przekroczeniu limitu logowanie musi zwrocic 429, nie 401."""
+    """Po przekroczeniu limitu logowanie musi zwrocic 429, nie 401.
+
+    Obowiazuja dwa limity naraz: 10/min na adres IP oraz ostrzejszy 5/min
+    na konkretne konto. Przy powtarzaniu tego samego loginu pierwszy zadziala
+    limit na konto.
+    """
     kody = [
         rate_limited_client.post(
             "/api/auth/login", json={"username": "k.nowak", "password": "zle"}
@@ -94,7 +128,24 @@ def test_powtarzane_proby_logowania_sa_blokowane(rate_limited_client):
         for _ in range(15)
     ]
     assert 429 in kody, "Brak blokady — atak slownikowy nie jest ograniczany"
-    assert kody.index(429) >= 10, "Limit zadzialal zbyt wczesnie"
+    assert kody.index(429) >= 5, "Limit zadzialal zbyt wczesnie"
+    assert kody[0] == 401, "Pierwsza proba musi byc normalnie obsluzona"
+
+
+def test_limit_na_konto_nie_blokuje_innych_uzytkownikow(rate_limited_client):
+    """Zablokowanie jednego konta nie moze odciac pozostalych.
+
+    Dlatego zamiast blokady konta stosowane jest spowolnienie z kluczem
+    zawierajacym nazwe uzytkownika — napastnik nie zablokuje cudzego dostepu.
+    """
+    for _ in range(8):
+        rate_limited_client.post("/api/auth/login",
+                                 json={"username": "k.nowak", "password": "zle"})
+
+    inny = rate_limited_client.post(
+        "/api/auth/login", json={"username": "m.lewandowski", "password": "tech123"}
+    )
+    assert inny.status_code == 200, "Limit dla jednego konta odcial inne konto"
 
 
 def test_limit_nie_dotyczy_zwyklych_odczytow(rate_limited_client, technik):

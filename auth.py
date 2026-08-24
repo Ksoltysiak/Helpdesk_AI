@@ -6,6 +6,8 @@ from functools import wraps
 from flask import request, jsonify, g
 from db import get_db
 
+_MIN_KEY_BYTES = 32  # RFC 7518 sekcja 3.2 dla HMAC-SHA256
+
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
     SECRET_KEY = "dev-only-insecure-key"
@@ -14,13 +16,22 @@ if not SECRET_KEY:
         "Set SECRET_KEY in production.",
         stacklevel=1,
     )
+elif len(SECRET_KEY.encode()) < _MIN_KEY_BYTES:
+    # Krotki klucz HMAC obniza realna sile podpisu tokenow.
+    warnings.warn(
+        f"SECRET_KEY is shorter than {_MIN_KEY_BYTES} bytes — weak signing key. "
+        f"Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"",
+        stacklevel=1,
+    )
 
 _TOKEN_TTL = 8 * 3600  # 8 hours
 
 
 def generate_token(user_id: int) -> str:
     now = int(time.time())
-    payload = {"sub": user_id, "iat": now, "exp": now + _TOKEN_TTL}
+    # RFC 7519 wymaga, aby "sub" bylo lancuchem znakow — PyJWT od wersji 2.12
+    # odrzuca tokeny z wartoscia liczbowa.
+    payload = {"sub": str(user_id), "iat": now, "exp": now + _TOKEN_TTL}
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
 
@@ -43,6 +54,10 @@ def current_user():
         return None
     uid = payload.get("sub")
     if uid is None:
+        return None
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
         return None
     return get_db().execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
 

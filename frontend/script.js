@@ -76,7 +76,6 @@ async function doLogin() {
     document.getElementById('app').classList.add('visible');
     setupSidebar();
     navigate('dashboard');
-    lucide.createIcons();
   } catch {
     showLoginError('Nie można połączyć z serwerem.');
   } finally {
@@ -171,7 +170,7 @@ function renderView(view) {
   c.innerHTML = spinner();
   switch (view) {
     case 'dashboard':   renderDashboard(); break;
-    case 'new-ticket':  c.innerHTML = renderNewTicket(); lucide.createIcons(); break;
+    case 'new-ticket':  c.innerHTML = renderNewTicket(); break;
     case 'my-tickets':  renderMyTickets(); break;
     case 'all-tickets': renderAllTickets(); break;
     default:            renderDashboard();
@@ -277,7 +276,6 @@ async function renderDashboard() {
   } catch (e) {
     c.innerHTML = errorCard(e.message || 'Błąd ładowania danych.');
   }
-  lucide.createIcons();
 }
 
 // ============================================================
@@ -307,7 +305,6 @@ async function renderMyTickets() {
   } catch (e) {
     c.innerHTML = errorCard(e.message);
   }
-  lucide.createIcons();
 }
 
 // ============================================================
@@ -350,7 +347,6 @@ async function renderAllTickets() {
   } catch (e) {
     c.innerHTML = errorCard(e.message);
   }
-  lucide.createIcons();
 }
 
 // ============================================================
@@ -501,7 +497,6 @@ async function openTicket(id) {
           ${allowed.length ? 'Zapisz' : 'Dodaj notatkę'}
         </button>` : ''}
       </div>`;
-    lucide.createIcons();
   } catch (e) {
     content.innerHTML = `<div style="padding:2rem">${errorCard(e.message)}<br><button class="btn btn-secondary" style="margin-top:1rem" onclick="closeModal()">Zamknij</button></div>`;
   }
@@ -687,7 +682,6 @@ async function restoreSession() {
     document.getElementById('app').classList.add('visible');
     setupSidebar();
     navigate('dashboard');
-    lucide.createIcons();
   } catch {
     // Token wygasl lub jest nieprawidlowy — zostajemy na ekranie logowania.
     state.token = null;
