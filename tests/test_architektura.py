@@ -107,11 +107,17 @@ def test_caly_kod_aplikacji_jest_w_repozytorium():
     import subprocess
 
     korzen = KATALOG_APLIKACJI.parent
-    sledzone = subprocess.run(
-        ["git", "ls-files", "app"],
-        cwd=korzen, capture_output=True, text=True, check=True,
-    ).stdout.split()
-    sledzone = {pathlib.PurePosixPath(s) for s in sledzone}
+    try:
+        wynik = subprocess.run(
+            ["git", "ls-files", "app"],
+            cwd=korzen, capture_output=True, text=True, check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        # Bez gita nie da sie sprawdzic stanu repozytorium — to nie jest blad
+        # kodu, wiec test nie ma prawa czerwienic sie z tego powodu.
+        pytest.skip(f"git niedostepny w tym srodowisku: {e}")
+
+    sledzone = {pathlib.PurePosixPath(s) for s in wynik.stdout.split()}
 
     na_dysku = {
         pathlib.PurePosixPath(p.relative_to(korzen).as_posix())
