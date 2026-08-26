@@ -93,6 +93,39 @@ def test_konfiguracja_jest_w_jednym_miejscu():
     assert not winowajcy, f"Konfiguracja czytana poza config.py: {winowajcy}"
 
 
+def test_caly_kod_aplikacji_jest_w_repozytorium():
+    """Każdy plik aplikacji musi być śledzony przez git.
+
+    REGRESJA: wpis `.gitignore` o treści `data/` (bez ukośnika na początku)
+    pasuje do KAŻDEGO katalogu o tej nazwie na dowolnym poziomie i po cichu
+    wykluczył z repozytorium całą warstwę `app/data/`. Testy lokalnie
+    przechodziły, bo pliki istniały na dysku — CI dostawało kod bez warstwy
+    dostępu do bazy i nie startowało.
+
+    Git nie ostrzega o takim pominięciu, więc pilnuje tego test.
+    """
+    import subprocess
+
+    korzen = KATALOG_APLIKACJI.parent
+    sledzone = subprocess.run(
+        ["git", "ls-files", "app"],
+        cwd=korzen, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    sledzone = {pathlib.PurePosixPath(s) for s in sledzone}
+
+    na_dysku = {
+        pathlib.PurePosixPath(p.relative_to(korzen).as_posix())
+        for p in KATALOG_APLIKACJI.rglob("*.py")
+        if "__pycache__" not in p.parts
+    }
+
+    brakujace = sorted(str(p) for p in na_dysku - sledzone)
+    assert not brakujace, (
+        f"Pliki istnieja lokalnie, ale NIE trafily do repozytorium: {brakujace}. "
+        f"Najczestsza przyczyna: zbyt ogolny wzorzec w .gitignore."
+    )
+
+
 def test_kazdy_modul_aplikacji_ma_opis():
     """Docstring modułu mówi, za co ta warstwa odpowiada."""
     bez_opisu = []
