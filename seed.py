@@ -66,10 +66,10 @@ def seed():
         tid = conn.execute(
             """INSERT INTO tickets
                (title, description, category, priority, status, created_by, assigned_to,
-                ai_categorized, sla_deadline, created_at, updated_at, closed_at)
-               VALUES (?,?,?,?,?,?,?,1,?,?,?,?)""",
+                ai_categorized, ai_pewnosc, sla_deadline, created_at, updated_at, closed_at)
+               VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?)""",
             (title, desc, ai["kategoria"], ai["priorytet"], status, created_by, assigned_to,
-             deadline, created, created, closed),
+             ai["pewnosc"], deadline, created, created, closed),
         ).lastrowid
 
         conn.execute(

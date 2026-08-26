@@ -7,12 +7,12 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
 
 | Miara | Wartość |
 |---|---|
-| Testy `pytest` | **275** (36 jednostkowych + 239 integracyjnych) |
+| Testy `pytest` | **315** (65 jednostkowych + 250 integracyjnych) |
 | Testy E2E (`demo.py`) | **21** sprawdzeń |
-| Łącznie automatycznych sprawdzeń | **296** |
-| Pokrycie kodu aplikacji | **100%** (421 instrukcji, 0 pominiętych) |
-| Czas wykonania `pytest` | ~38 s |
-| Wynik ostatniego przebiegu | 275 passed, 0 failed |
+| Łącznie automatycznych sprawdzeń | **336** |
+| Pokrycie kodu aplikacji | **100%** (468 instrukcji, 0 pominiętych) |
+| Czas wykonania `pytest` | ~42 s |
+| Wynik ostatniego przebiegu | 315 passed, 0 failed |
 
 ---
 
@@ -38,26 +38,27 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
                     │   E2E — demo.py       │   21 sprawdzeń
                     │   działający serwer   │   ~3 s
                     ├───────────────────────┤
-                │      Integracyjne         │   239 testow
+                │      Integracyjne         │   250 testow
                 │   Flask + baza danych     │   ~18 s
             ├───────────────────────────────────┤
-        │          Jednostkowe                  │   36 testów
+        │          Jednostkowe                  │   65 testów
         │      czysta logika, bez I/O           │   ~0,4 s
     └───────────────────────────────────────────────┘
 ```
 
 | Warstwa | Plik | Testy | Zakres |
 |---|---|---|---|
-| Jednostkowa | `tests/test_ai.py` | 17 | Kategoryzacja AI, priorytety, SLA |
+| Jednostkowa | `tests/test_ai.py` | 19 | Kategoryzacja AI, priorytety, SLA |
 | Jednostkowa | `tests/test_tokens.py` | 10 | Generowanie i weryfikacja JWT |
 | Jednostkowa | `tests/test_transitions.py` | 9 | Maszyna stanów zgłoszenia |
+| Jednostkowa | `tests/test_ai_skutecznosc.py` | 27 | Normalizacja polszczyzny, pewność, próg skuteczności |
 | Integracyjna | `tests/test_api_auth.py` | 28 | Logowanie, ochrona endpointów |
-| Integracyjna | `tests/test_api_tickets.py` | 59 | RBAC, CRUD, notatki, audyt |
+| Integracyjna | `tests/test_api_tickets.py` | 68 | RBAC, CRUD, notatki, audyt |
 | Integracyjna | `tests/test_api_security.py` | 23 | Nagłówki, 404 API, limit żądań |
 | Integracyjna | `tests/test_openapi.py` | 27 | Zgodność dokumentacji z implementacją |
 | Integracyjna | `tests/test_walidacja_typow.py` | 44 | Typy danych wejściowych, błędy w JSON |
 | Integracyjna | `tests/test_wdrozenie.py` | 12 | HTTPS, HSTS, proxy, siła klucza |
-| Integracyjna | `tests/test_wydajnosc.py` | 44 | Stronicowanie, indeksy, kompresja, cache, health |
+| Integracyjna | `tests/test_wydajnosc.py` | 47 | Stronicowanie, indeksy, kompresja, cache, health |
 | E2E | `demo.py` | 21 | Pełny przepływ przez HTTP |
 
 **Uwaga o kształcie piramidy.** Warstwa integracyjna jest tu liczniejsza niż

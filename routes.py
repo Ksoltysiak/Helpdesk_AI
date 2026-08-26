@@ -4,7 +4,7 @@ from werkzeug.security import check_password_hash
 import json
 from db import get_db, log_audit
 from auth import login_required, roles_required, generate_token
-from ai import categorize, CATEGORIES, SLA_HOURS
+from ai import categorize, CATEGORIES, SLA_HOURS, PROG_PEWNOSCI
 from rate_limit import limiter, klucz_logowania
 
 api = Blueprint("api", __name__)
@@ -69,6 +69,7 @@ def serialize(t):
         "created_by":    t["created_by"],
         "assigned_to":   t["assigned_to"],
         "ai_categorized": bool(t["ai_categorized"]),
+        "ai_pewnosc":    t["ai_pewnosc"] if "ai_pewnosc" in keys else None,
         "sla_deadline":  t["sla_deadline"],
         "created_at":    t["created_at"],
         "updated_at":    t["updated_at"],
@@ -243,8 +244,9 @@ def create_ticket():
     result   = categorize(title, description)
     deadline = (datetime.now() + timedelta(hours=SLA_HOURS[result["priorytet"]])).isoformat(timespec="seconds")
     db.execute(
-        "UPDATE tickets SET category=?, priority=?, ai_categorized=1, sla_deadline=?, updated_at=datetime('now') WHERE id=?",
-        (result["kategoria"], result["priorytet"], deadline, ticket_id),
+        "UPDATE tickets SET category=?, priority=?, ai_categorized=1, ai_pewnosc=?,"
+        " sla_deadline=?, updated_at=datetime('now') WHERE id=?",
+        (result["kategoria"], result["priorytet"], result["pewnosc"], deadline, ticket_id),
     )
     log_audit(db, ticket_id, g.user["id"], "Utworzenie", None, "Nowe")
     log_audit(db, ticket_id, None, "Kategoryzacja AI", None, json.dumps(result, ensure_ascii=False))
@@ -373,6 +375,59 @@ def ticket_audit(ticket_id):
          "old": r["old_value"], "new": r["new_value"], "timestamp": r["timestamp"]}
         for r in rows
     ])
+
+
+@api.route("/ai/skutecznosc", methods=["GET"])
+@roles_required("technik", "admin")
+def ai_skutecznosc():
+    """Miara jakosci kategoryzacji liczona z rzeczywistej pracy technikow.
+
+    Kazda reczna zmiana kategorii to sygnal, ze moduł pomylil sie na konkretnym
+    zgloszeniu. Zamiast deklarowac skutecznosc, wyliczamy ja z tego, jak czesto
+    czlowiek poprawia maszyne — i pokazujemy, ktore kategorie myla sie najczesciej.
+    """
+    db = get_db()
+
+    ai_razem = db.execute(
+        "SELECT COUNT(*) c FROM tickets WHERE ai_categorized = 1"
+    ).fetchone()["c"]
+
+    # Zgloszenia, w ktorych technik zmienil kategorie nadana przez AI.
+    poprawione = db.execute("""
+        SELECT COUNT(DISTINCT ticket_id) c FROM audit_log
+        WHERE action = 'Zmiana kategorii'
+    """).fetchone()["c"]
+
+    # Najczestsze pomylki: z czego na co poprawiano.
+    pomylki = db.execute("""
+        SELECT old_value AS z, new_value AS na, COUNT(*) c
+        FROM audit_log
+        WHERE action = 'Zmiana kategorii' AND old_value IS NOT NULL
+        GROUP BY old_value, new_value
+        ORDER BY c DESC
+        LIMIT 5
+    """).fetchall()
+
+    niepewne = db.execute(
+        "SELECT COUNT(*) c FROM tickets WHERE ai_categorized = 1 AND ai_pewnosc < ?",
+        (PROG_PEWNOSCI,),
+    ).fetchone()["c"]
+
+    srednia = db.execute(
+        "SELECT AVG(ai_pewnosc) s FROM tickets WHERE ai_pewnosc IS NOT NULL"
+    ).fetchone()["s"]
+
+    return jsonify({
+        "zgloszen_z_ai":          ai_razem,
+        "poprawionych_recznie":   poprawione,
+        "skutecznosc":            round(1 - poprawione / ai_razem, 3) if ai_razem else None,
+        "srednia_pewnosc":        round(srednia, 3) if srednia is not None else None,
+        "wymaga_weryfikacji":     niepewne,
+        "prog_pewnosci":          PROG_PEWNOSCI,
+        "najczestsze_pomylki": [
+            {"z": p["z"], "na": p["na"], "liczba": p["c"]} for p in pomylki
+        ],
+    })
 
 
 @api.route("/ai/categorize", methods=["POST"])

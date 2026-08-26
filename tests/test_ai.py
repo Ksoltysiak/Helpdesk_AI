@@ -14,9 +14,11 @@ pytestmark = pytest.mark.unit
 # Podstawowy kontrakt funkcji
 # ---------------------------------------------------------------
 
-def test_zwraca_oba_wymagane_pola():
+def test_zwraca_komplet_pol():
+    """Poza decyzja moduł zwraca tez jej pewnosc i uzasadnienie."""
     result = categorize("Nie dziala VPN", "Blad TLS handshake")
-    assert set(result) == {"kategoria", "priorytet"}
+    assert set(result) == {"kategoria", "priorytet", "pewnosc",
+                           "wymaga_weryfikacji", "dopasowania"}
 
 
 def test_kategoria_zawsze_z_dozwolonej_listy():
@@ -29,9 +31,12 @@ def test_priorytet_zawsze_ma_zdefiniowane_sla():
     assert result["priorytet"] in SLA_HOURS
 
 
-def test_brak_dopasowania_daje_wartosc_domyslna():
+def test_brak_dopasowania_konczy_sie_przyznaniem_do_niewiedzy():
+    """Zamiast po cichu zgadywac, moduł ma zasygnalizowac brak przeslanek."""
     result = categorize("Cos dziwnego", "Nieokreslony problem bez slow kluczowych")
-    assert result == {"kategoria": "Oprogramowanie", "priorytet": "Sredni"}
+    assert result["pewnosc"] == 0.0
+    assert result["wymaga_weryfikacji"] is True
+    assert result["dopasowania"] == []
 
 
 def test_dopasowanie_ignoruje_wielkosc_liter():
@@ -69,10 +74,12 @@ def test_incydent_bezpieczenstwa_ma_najwyzszy_priorytet(tytul, opis):
     assert SLA_HOURS[result["priorytet"]] == 1
 
 
-def test_wygrywa_najpowazniejsze_dopasowanie_nie_pierwsze():
-    """'klawiatura' (Niski) + 'serwer' (Krytyczny) -> musi wygrac Krytyczny."""
-    result = categorize("Wymiana klawiatury", "Przy okazji nie odpowiada serwer plikow")
-    assert result["priorytet"] == "Krytyczny"
+def test_dowody_z_wielu_slow_sa_sumowane():
+    """Dwa slowa tej samej kategorii daja wyzsza pewnosc niz jedno."""
+    jedno = categorize("Problem z drukarka", "")
+    dwa = categorize("Problem z drukarka", "skaner tez nie odpowiada")
+    assert dwa["pewnosc"] >= jedno["pewnosc"]
+    assert len(dwa["dopasowania"]) > len(jedno["dopasowania"])
 
 
 # ---------------------------------------------------------------
@@ -93,13 +100,31 @@ def test_zwykle_zgloszenia_nie_sa_eskalowane(tytul, opis, oczekiwany):
 # ---------------------------------------------------------------
 
 def test_kazde_slowo_kluczowe_wskazuje_istniejaca_kategorie():
-    for keyword, (category, _) in KEYWORDS.items():
+    for keyword, (category, _, _w) in KEYWORDS.items():
         assert category in CATEGORIES, f"'{keyword}' wskazuje nieznana kategorie '{category}'"
 
 
 def test_kazde_slowo_kluczowe_ma_priorytet_ze_zdefiniowanym_sla():
-    for keyword, (_, priority) in KEYWORDS.items():
+    for keyword, (_, priority, _w) in KEYWORDS.items():
         assert priority in SLA_HOURS, f"'{keyword}' ma priorytet '{priority}' bez SLA"
+
+
+def test_kazde_slowo_kluczowe_ma_sensowna_wage():
+    for keyword, (_, _p, waga) in KEYWORDS.items():
+        assert isinstance(waga, int) and 1 <= waga <= 3, f"'{keyword}' ma wage {waga}"
+
+
+POLSKIE_ZNAKI = "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ"
+
+
+def test_slownik_jest_zapisany_bez_polskich_znakow():
+    """Tekst wejsciowy jest normalizowany, wiec slownik musi byc w tej samej postaci.
+
+    Rdzen zawierajacy polski znak nie dopasowalby sie nigdy — to wlasnie ta
+    niezgodnosc powodowala, ze modul nie rozpoznawal poprawnej polszczyzny.
+    """
+    with_diakrytykami = [k for k in KEYWORDS if any(z in k for z in POLSKIE_ZNAKI)]
+    assert not with_diakrytykami, f"Rdzenie nie do dopasowania: {with_diakrytykami}"
 
 
 def test_sla_rosnie_wraz_ze_spadkiem_pilnosci():

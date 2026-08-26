@@ -152,8 +152,15 @@ def create_app():
         if request.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         elif request.path.rsplit(".", 1)[-1] in ("css", "js", "svg", "png", "ico", "woff2"):
-            # Pliki wersjonowane sa trescia — walidacja przez ETag Flaska.
-            response.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
+            # "no-cache" nie znaczy "nie buforuj" — znaczy "buforuj, ale za
+            # kazdym razem potwierdz aktualnosc". Przegladarka wysyla ETag,
+            # a serwer odpowiada pustym 304, jesli plik sie nie zmienil:
+            # oszczednosc transferu zostaje, a ryzyko znika.
+            #
+            # Swiadomie NIE uzywamy max-age: nazwy plikow nie zawieraja skrotu
+            # tresci, wiec po wdrozeniu przegladarka trzymalaby stary kod
+            # frontendu i wykonywala go wobec nowego API.
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     @app.route("/", defaults={"path": ""})

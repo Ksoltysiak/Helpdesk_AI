@@ -534,6 +534,79 @@ paths:
           $ref: "#/components/responses/BrakUprawnien"
 
   # ---------------------------------------------------------------
+  /ai/skutecznosc:
+    get:
+      tags: [Pulpit i AI]
+      summary: Skuteczność kategoryzacji AI
+      description: |
+        Miara jakości modułu liczona z **rzeczywistej pracy techników**, a nie
+        deklarowana. Każda ręczna zmiana kategorii to sygnał, że moduł pomylił
+        się na konkretnym zgłoszeniu — skuteczność to odsetek zgłoszeń,
+        których nie trzeba było poprawiać.
+
+        Zestawienie pokazuje też najczęstsze pomyłki (z jakiej kategorii na
+        jaką poprawiano), co wprost wskazuje, które słowa kluczowe wymagają
+        uzupełnienia.
+
+        Wymaga roli `technik` lub `admin`.
+      responses:
+        "200":
+          description: Zestawienie skuteczności
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - zgloszen_z_ai
+                  - poprawionych_recznie
+                  - skutecznosc
+                  - srednia_pewnosc
+                  - wymaga_weryfikacji
+                  - prog_pewnosci
+                  - najczestsze_pomylki
+                properties:
+                  zgloszen_z_ai:
+                    type: integer
+                    description: Liczba zgłoszeń skategoryzowanych automatycznie
+                    example: 318
+                  poprawionych_recznie:
+                    type: integer
+                    description: Ile z nich technik przekwalifikował
+                    example: 24
+                  skutecznosc:
+                    type: number
+                    format: float
+                    nullable: true
+                    description: "1 − (poprawione / wszystkie); `null`, gdy brak danych"
+                    example: 0.925
+                  srednia_pewnosc:
+                    type: number
+                    format: float
+                    nullable: true
+                    example: 0.68
+                  wymaga_weryfikacji:
+                    type: integer
+                    description: Zgłoszenia o pewności poniżej progu
+                    example: 12
+                  prog_pewnosci:
+                    type: number
+                    format: float
+                    example: 0.4
+                  najczestsze_pomylki:
+                    type: array
+                    description: Kierunki najczęstszych ręcznych korekt
+                    items:
+                      type: object
+                      properties:
+                        z:      { type: string, example: Oprogramowanie }
+                        na:     { type: string, example: Konta i dostep }
+                        liczba: { type: integer, example: 7 }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+
+  # ---------------------------------------------------------------
   /ai/categorize:
     post:
       tags: [Pulpit i AI]
@@ -616,10 +689,34 @@ components:
 
     WynikAI:
       type: object
-      required: [kategoria, priorytet]
+      required: [kategoria, priorytet, pewnosc, wymaga_weryfikacji, dopasowania]
       properties:
         kategoria: { $ref: "#/components/schemas/Kategoria" }
         priorytet: { $ref: "#/components/schemas/Priorytet" }
+        pewnosc:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: |
+            Siła przesłanek stojących za decyzją. Zależy od tego, jak bardzo
+            zwycięska kategoria dominuje nad pozostałymi oraz ile niezależnych
+            słów ją wskazuje. Wartość `0.0` oznacza brak jakichkolwiek
+            przesłanek — moduł nie rozpoznał zgłoszenia.
+          example: 0.75
+        wymaga_weryfikacji:
+          type: boolean
+          description: |
+            `true`, gdy pewność jest poniżej progu (0.4). Zgłoszenie powinno
+            zostać sprawdzone przez technika — moduł nie zgaduje po cichu.
+          example: false
+        dopasowania:
+          type: array
+          description: |
+            Słowa kluczowe, które zadecydowały o kategorii — uzasadnienie
+            decyzji dla technika.
+          items: { type: string }
+          example: ["vpn", "polaczen"]
 
     Zgloszenie:
       type: object
@@ -633,6 +730,7 @@ components:
         - created_by
         - assigned_to
         - ai_categorized
+        - ai_pewnosc
         - sla_deadline
         - created_at
         - updated_at
@@ -673,6 +771,17 @@ components:
           type: boolean
           description: Czy kategorię nadał moduł AI
           example: true
+        ai_pewnosc:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: |
+            Pewność modułu AI zapisana w chwili tworzenia zgłoszenia.
+            Pozwala technikowi odróżnić decyzje pewne od zgadywanych.
+            `null` dla zgłoszeń sprzed wprowadzenia tego pola.
+          example: 0.75
         sla_deadline:
           type: string
           format: date-time

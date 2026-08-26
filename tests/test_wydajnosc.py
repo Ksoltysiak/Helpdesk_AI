@@ -142,6 +142,56 @@ def test_init_db_mozna_wywolac_wielokrotnie(app):
     assert liczba == 4, "Ponowna inicjalizacja nie moze dublowac ani kasowac danych"
 
 
+def test_migracja_dodaje_brakujaca_kolumne_do_istniejacej_bazy(tmp_path, monkeypatch):
+    """Baza z wczesniejszej wersji musi dostac nowe kolumny przy starcie.
+
+    CREATE TABLE IF NOT EXISTS nie zmienia istniejacej tabeli, wiec bez kroku
+    migracji wdrozenie na dzialajaca baze konczy sie bledem "no such column".
+    """
+    stara = tmp_path / "stara.db"
+    conn = sqlite3.connect(stara)
+    # Schemat sprzed dodania kolumny ai_pewnosc.
+    conn.executescript("""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL, name TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('pracownik','technik','admin')), email TEXT);
+        CREATE TABLE tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL,
+            description TEXT NOT NULL, category TEXT, priority TEXT,
+            status TEXT NOT NULL DEFAULT 'Nowe',
+            created_by INTEGER NOT NULL REFERENCES users(id),
+            assigned_to INTEGER REFERENCES users(id), ai_categorized INTEGER DEFAULT 0,
+            sla_deadline TEXT, created_at TEXT, updated_at TEXT, closed_at TEXT);
+        CREATE TABLE notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL,
+            author_id INTEGER NOT NULL, content TEXT NOT NULL,
+            internal INTEGER DEFAULT 1, created_at TEXT);
+        CREATE TABLE audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL,
+            user_id INTEGER, action TEXT NOT NULL, old_value TEXT,
+            new_value TEXT, timestamp TEXT);
+    """)
+    conn.execute("INSERT INTO users (id,username,password,name,role) VALUES (1,'a','h','A','pracownik')")
+    conn.execute("INSERT INTO tickets (id,title,description,status,created_by) VALUES (1,'T','O','Nowe',1)")
+    conn.commit()
+
+    kolumny_przed = {w[1] for w in conn.execute("PRAGMA table_info(tickets)")}
+    conn.close()
+    assert "ai_pewnosc" not in kolumny_przed, "Zalozenie testu: stara baza nie ma kolumny"
+
+    monkeypatch.setattr(db_module, "DB_PATH", str(stara))
+    db_module.init_db()
+
+    conn = sqlite3.connect(stara)
+    kolumny_po = {w[1] for w in conn.execute("PRAGMA table_info(tickets)")}
+    zachowane = conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0]
+    conn.close()
+
+    assert "ai_pewnosc" in kolumny_po, "Migracja nie dodala kolumny"
+    assert zachowane == 1, "Migracja nie moze kasowac istniejacych danych"
+
+
 def test_baza_dziala_w_trybie_wal(app):
     conn = sqlite3.connect(db_module.DB_PATH)
     tryb = conn.execute("PRAGMA journal_mode").fetchone()[0]
@@ -257,9 +307,28 @@ def test_dane_logowania_nie_sa_cache_owane(client):
 
 
 @pytest.mark.parametrize("plik", ["/style.css", "/script.js"])
-def test_pliki_statyczne_maja_naglowek_cache(client, plik):
+def test_pliki_statyczne_sa_walidowane_a_nie_trzymane_na_slepo(client, plik):
+    """REGRESJA: 'max-age=3600' powodowal, ze po wdrozeniu przegladarka przez
+    godzine wykonywala STARY frontend wobec nowego API.
+
+    Nazwy plikow nie zawieraja skrotu tresci, wiec jedyna bezpieczna polityka
+    to walidacja przy kazdym zadaniu ('no-cache').
+    """
     cache = client.get(plik).headers.get("Cache-Control", "")
-    assert "max-age" in cache and "must-revalidate" in cache
+    assert "no-cache" in cache
+    assert "max-age" not in cache
+
+
+@pytest.mark.parametrize("plik", ["/style.css", "/script.js"])
+def test_niezmieniony_plik_zwraca_304(client, plik):
+    """Walidacja nie moze oznaczac ponownego przesylania calej tresci."""
+    pierwsza = client.get(plik)
+    etag = pierwsza.headers.get("ETag")
+    assert etag, "Brak ETag — walidacja warunkowa nie zadziala"
+
+    druga = client.get(plik, headers={"If-None-Match": etag})
+    assert druga.status_code == 304
+    assert druga.get_data() == b""
 
 
 def test_strona_glowna_nie_jest_cache_owana_na_stale(client):

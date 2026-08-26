@@ -429,7 +429,7 @@ function renderTicketTable(tickets, showAuthor) {
       <td class="td-id">#${t.id}</td>
       <td>
         <div style="font-weight:500">${escHtml(t.title)}</div>
-        <div class="td-muted">${escHtml(t.category || '—')} ${t.ai_categorized ? '<span class="badge badge-ai">AI</span>' : ''}</div>
+        <div class="td-muted">${escHtml(t.category || '—')} ${znacznikAI(t)}</div>
       </td>
       <td>${priorityBadge(t.priority)}</td>
       <td>${statusBadge(t.status)}</td>
@@ -508,10 +508,14 @@ async function openTicket(id) {
           <div class="info-item"><div class="info-item-label">Priorytet</div>${priorityBadge(t.priority)}</div>
           <div class="info-item">
             <div class="info-item-label">Kategoria</div>
-            <div style="font-size:var(--text-sm);display:flex;align-items:center;gap:0.375rem">
+            <div style="font-size:var(--text-sm);display:flex;align-items:center;gap:0.375rem;flex-wrap:wrap">
               ${escHtml(t.category || '—')}
-              ${t.ai_categorized ? '<span class="badge badge-ai">🤖 AI</span>' : ''}
+              ${znacznikAI(t)}
             </div>
+            ${t.ai_categorized && t.ai_pewnosc !== null && t.ai_pewnosc < PROG_PEWNOSCI
+              ? `<div style="font-size:var(--text-xs);color:var(--color-error);margin-top:0.25rem">
+                   Niska pewność — sprawdź, czy kategoria jest właściwa
+                 </div>` : ''}
           </div>
           ${t.sla_deadline ? `<div class="info-item"><div class="info-item-label">Termin SLA</div><div style="font-size:var(--text-sm)">${formatDateTime(t.sla_deadline)}</div></div>` : ''}
           <div class="info-item">
@@ -655,6 +659,21 @@ function priorityBadge(p) {
   const cls  = { 'Krytyczny':'badge-krityczny','Wysoki':'badge-wysoki','Sredni':'badge-sredni','Niski':'badge-niski' };
   const dots = { 'Krytyczny':'var(--color-error)','Wysoki':'var(--color-orange)','Sredni':'var(--color-warning)','Niski':'var(--color-success)' };
   return `<span class="badge ${cls[p]||''}"><span style="width:6px;height:6px;border-radius:50%;background:${dots[p]||'currentColor'};flex-shrink:0"></span>${escHtml(p||'—')}</span>`;
+}
+
+// Próg zgodny z PROG_PEWNOSCI w ai.py — poniżej niego moduł sam sygnalizuje,
+// że zgadywał, a nie rozpoznał.
+const PROG_PEWNOSCI = 0.4;
+
+function znacznikAI(t) {
+  if (!t.ai_categorized) return '';
+  const p = t.ai_pewnosc;
+  if (p !== null && p !== undefined && p < PROG_PEWNOSCI) {
+    return `<span class="badge badge-krityczny" title="Moduł AI nie był pewny (${Math.round(p * 100)}%) — warto sprawdzić kategorię">AI ?</span>`;
+  }
+  const opis = (p === null || p === undefined) ? 'Kategoria nadana przez AI'
+             : `Kategoria nadana przez AI (pewność ${Math.round(p * 100)}%)`;
+  return `<span class="badge badge-ai" title="${opis}">AI</span>`;
 }
 
 function statusBadge(s) {

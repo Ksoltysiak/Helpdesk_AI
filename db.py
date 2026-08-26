@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     created_by      INTEGER NOT NULL REFERENCES users(id),
     assigned_to     INTEGER REFERENCES users(id),
     ai_categorized  INTEGER DEFAULT 0,
+    ai_pewnosc      REAL,
     sla_deadline    TEXT,
     created_at      TEXT DEFAULT (datetime('now')),
     updated_at      TEXT DEFAULT (datetime('now')),
@@ -108,13 +109,32 @@ def close_db(exception=None):
         db.close()
 
 
+# Kolumny dodane po pierwszym wdrozeniu. CREATE TABLE IF NOT EXISTS nie zmienia
+# istniejacej tabeli, wiec baze z wczesniejszej wersji trzeba uzupelnic wprost.
+MIGRACJE = (
+    ("tickets", "ai_pewnosc", "REAL"),
+)
+
+
+def _domigruj(conn):
+    for tabela, kolumna, typ in MIGRACJE:
+        istniejace = {w[1] for w in conn.execute(f"PRAGMA table_info({tabela})")}
+        if kolumna not in istniejace:
+            conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {kolumna} {typ}")
+
+
 def init_db():
-    """Tworzy brakujace tabele i indeksy. Bezpieczne do wielokrotnego wywolania."""
+    """Tworzy brakujace tabele, kolumny i indeksy.
+
+    Bezpieczne do wielokrotnego wywolania — uruchamiane przy kazdym starcie
+    kontenera, wiec istniejaca baza dostaje zmiany schematu bez osobnego kroku.
+    """
     conn = sqlite3.connect(DB_PATH)
     _zastosuj_pragmy(conn)
     nazwa, wartosc = PRAGMA_TRWALA
     conn.execute(f"PRAGMA {nazwa} = {wartosc}")
     conn.executescript(SCHEMA)
+    _domigruj(conn)
     conn.executescript(INDEKSY)
     conn.commit()
     conn.close()

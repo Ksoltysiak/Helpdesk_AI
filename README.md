@@ -33,6 +33,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 | `openapi.yaml`        | Specyfikacja API (OpenAPI 3.0) — źródło prawdy dla dokumentacji |
 | `SECURITY.md`         | Audyt bezpieczeństwa — weryfikacja 20 zabezpieczeń |
 | `PERFORMANCE.md`      | Pomiary wydajności, wprowadzone optymalizacje i ograniczenia |
+| `AI.md`               | Moduł kategoryzacji — działanie, skuteczność, ograniczenia |
 | `db.py`               | Schemat bazy danych, połączenie, zapis audytu              |
 | `auth.py`             | JWT, generowanie/weryfikacja tokenów, dekoratory RBAC      |
 | `rate_limit.py`       | Instancja Flask-Limiter (ograniczanie żądań)               |
@@ -109,8 +110,8 @@ py -m pytest
 
 | Warstwa | Liczba | Zakres |
 |---|---|---|
-| Jednostkowe | 36 | Kategoryzacja AI, tokeny JWT, maszyna stanów |
-| Integracyjne | 239 | Flask + baza: RBAC, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
+| Jednostkowe | 65 | Kategoryzacja AI i jej skuteczność, tokeny JWT, maszyna stanów |
+| Integracyjne | 250 | Flask + baza: RBAC, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
 | E2E (`demo.py`) | 21 | Pełny przepływ przez działający serwer |
 
 Testy uruchamiają się automatycznie przy każdym pull requeście
@@ -245,6 +246,7 @@ orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
 | PATCH  | `/api/tickets/{id}`        | technik/admin | Zmiana statusu / kategorii / przypisania    |
 | POST   | `/api/tickets/{id}/notes`  | technik/admin | Notatka (wewnętrzna lub widoczna)           |
 | GET    | `/api/tickets/{id}/audit`  | technik/admin | Pełna ścieżka audytu                        |
+| GET    | `/api/ai/skutecznosc`      | technik/admin | Skuteczność AI liczona z korekt techników   |
 | POST   | `/api/ai/categorize`       | każdy         | Test modułu AI na dowolnym tekście          |
 
 **Autoryzacja:** każde żądanie (poza logowaniem) wymaga nagłówka:
@@ -272,6 +274,10 @@ z kodem 400 i listą dozwolonych przejść.
 
 ## Kategoryzacja AI
 
+**Skuteczność:** 100% na zbiorze ewaluacyjnym (29 zgłoszeń), **94,4% na zbiorze
+kontrolnym** nieużywanym do strojenia. Pełny opis działania, pomiary
+i ograniczenia: **[AI.md](AI.md)**.
+
 Moduł `ai.py` przy każdym nowym zgłoszeniu automatycznie nadaje **kategorię**
 (Sprzęt, Oprogramowanie, Sieć, Poczta, Konta i dostęp, Bezpieczeństwo,
 Peryferia) oraz **priorytet** (Niski, Średni, Wysoki, Krytyczny). Priorytet
@@ -279,11 +285,17 @@ wyznacza termin SLA. Domyślnie moduł działa lokalnie (bez kluczy API i
 kosztów); w pliku `ai.py` opisano, jak podłączyć prawdziwy model językowy
 (np. OpenAI) bez zmian w reszcie back-endu.
 
-**Zasada triażu:** gdy zgłoszenie pasuje do kilku słów kluczowych naraz
-(np. „phishing" i „hasło"), wybierane jest dopasowanie o **najwyższym
-priorytecie**. Dzięki temu incydent bezpieczeństwa nie zostanie
-zaklasyfikowany jako rutynowa prośba o reset hasła i nie dostanie
-łagodniejszego terminu SLA (1h zamiast 8h).
+Moduł zwraca też **pewność** swojej decyzji i listę słów, które o niej
+zadecydowały. Gdy nic nie pasuje, zamiast zgadywać oznacza zgłoszenie jako
+wymagające weryfikacji — w interfejsie widoczne jako znacznik **„AI ?"**.
+
+**Zasada triażu:** gdy zgłoszenie pasuje do kilku słów kluczowych naraz,
+decyduje suma dowodów, a zgłoszenia bezpieczeństwa zawsze dostają priorytet
+krytyczny (SLA 1h). Priorytet jest podnoszony, gdy w treści widać skalę awarii
+(„cały dział") lub pilność („nie włącza się", „pilne").
+
+**Pomiar na żywo:** `GET /api/ai/skutecznosc` liczy jakość modułu z ręcznych
+korekt techników i wskazuje, które kategorie mylą się najczęściej.
 
 ---
 
