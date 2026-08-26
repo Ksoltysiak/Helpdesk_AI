@@ -119,7 +119,17 @@ jobs:
     # Publikujemy dopiero, gdy wszystko powyzej przeszlo, i wylacznie
     # z galezi main — pull requesty buduja obraz, ale go nie publikuja.
     needs: [testy, bezpieczenstwo-zaleznosci, stos-docker]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    #
+    # Krok jest OPCJONALNY i wlaczany zmienna repozytorium PUBLIKUJ_OBRAZ.
+    # Powod: zapis do rejestru GHCR wymaga uprawnien, ktorych nie da sie nadac
+    # z poziomu kodu — w ustawieniach repozytorium trzeba wlaczyc
+    # Settings -> Actions -> General -> Workflow permissions -> Read and write.
+    # Bez tego zadanie konczy sie bledem i psuje wynik calego przebiegu, mimo
+    # ze aplikacja jest sprawna. Instrukcja wlaczenia: ARCHITECTURE.md.
+    if: >-
+      github.ref == 'refs/heads/main'
+      && github.event_name == 'push'
+      && vars.PUBLIKUJ_OBRAZ == 'true'
 
     permissions:
       contents: read

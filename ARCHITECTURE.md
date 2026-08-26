@@ -133,7 +133,23 @@ i przy każdym pull requeście:
 | **Testy** | Jednostkowe, integracyjne i architektoniczne + raport pokrycia; osobno E2E przy działającym serwerze |
 | **Skanowanie zależności** | `pip-audit --strict` względem bazy podatnosci PyPI |
 | **Pełny stos** | `docker compose up` z nginx; sprawdza zdrowie przez proxy, brak uprawnień root, dostępność dokumentacji i frontendu |
-| **Publikacja obrazu (CD)** | Tylko z `main` i tylko gdy wszystko powyżej przeszło — obraz trafia do GHCR ze znacznikiem `latest` oraz SHA commita |
+| **Publikacja obrazu (CD)** | Tylko z `main`, tylko gdy wszystko powyżej przeszło i tylko po włączeniu (opis niżej) — obraz trafia do GHCR ze znacznikiem `latest` oraz SHA commita |
+
+### Włączenie publikacji obrazu
+
+Krok CD jest domyślnie **wyłączony**, ponieważ zapis do rejestru wymaga
+uprawnień, których nie da się nadać z poziomu kodu. Bez nich zadanie kończy się
+błędem i psuje wynik całego przebiegu, mimo że aplikacja jest sprawna.
+
+Aby go włączyć:
+
+1. **Settings → Actions → General → Workflow permissions** → zaznacz
+   *Read and write permissions*.
+2. **Settings → Secrets and variables → Actions → Variables** → dodaj zmienną
+   `PUBLIKUJ_OBRAZ` o wartości `true`.
+
+Do czasu wyboru docelowego hostingu publikowanie obrazu nie jest potrzebne —
+warto włączyć je razem z wdrożeniem.
 
 Stos testowany jest przez `docker compose`, a nie jako sam kontener aplikacji:
 błąd w konfiguracji nginx albo w połączeniu między usługami nie ujawniłby się
