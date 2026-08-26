@@ -6,7 +6,7 @@ osobno, czy endpoint faktycznie tej tabeli przestrzega.
 
 import pytest
 
-from routes import TRANSITIONS
+from app.domain.tickets import TRANSITIONS
 
 pytestmark = pytest.mark.unit
 

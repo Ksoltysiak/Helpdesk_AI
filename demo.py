@@ -1,8 +1,12 @@
 import requests
 import json
+import os
 import sys
 
-BASE = "http://localhost:5000/api"
+# Adres da sie nadpisac, bo aplikacja moze stac za nginx (port 8080)
+# albo byc uruchomiona bezposrednio (port 5000).
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:5000").rstrip("/")
+BASE = f"{BASE_URL}/api"
 
 ok = 0
 fail = 0
@@ -35,9 +39,9 @@ def auth(token):
 
 
 try:
-    requests.get("http://localhost:5000/", timeout=2)
+    requests.get(f"{BASE_URL}/", timeout=2)
 except requests.exceptions.RequestException:
-    print("Serwer nie odpowiada. Uruchom najpierw:  py app.py")
+    print(f"Serwer pod {BASE_URL} nie odpowiada. Uruchom go najpierw.")
     sys.exit(1)
 
 

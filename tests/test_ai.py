@@ -5,7 +5,7 @@ Czysta funkcja, bez I/O — najszybsza i najliczniejsza warstwa piramidy.
 
 import pytest
 
-from ai import categorize, CATEGORIES, KEYWORDS, SLA_HOURS
+from app.domain.ai import categorize, CATEGORIES, KEYWORDS, SLA_HOURS
 
 pytestmark = pytest.mark.unit
 

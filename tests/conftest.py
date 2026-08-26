@@ -20,9 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from werkzeug.security import generate_password_hash  # noqa: E402
 
-import db as db_module  # noqa: E402
+from app import config as db_module
+from app.data import database  # noqa: E402
 from app import create_app  # noqa: E402
-from rate_limit import limiter  # noqa: E402
+from app.extensions import limiter  # noqa: E402
 
 
 # Uzytkownicy testowi: (id, login, haslo, imie, rola)
@@ -95,7 +96,7 @@ def wzorzec_bazy(tmp_path_factory):
     poprzednia = db_module.DB_PATH
     db_module.DB_PATH = str(sciezka)
     try:
-        db_module.init_db()
+        database.init_db()
         _seed(str(sciezka))
     finally:
         db_module.DB_PATH = poprzednia

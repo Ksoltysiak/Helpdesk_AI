@@ -14,6 +14,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 - [Szybki start (lokalnie, bez Dockera)](#szybki-start-lokalnie-bez-dockera)
 - [Testy](#testy)
 - [Weryfikacja działania](#weryfikacja-działania)
+- [Architektura](#architektura)
 - [Bezpieczeństwo](#bezpieczeństwo)
 - [Wydajność](#wydajność)
 - [Role użytkowników](#role-użytkowników)
@@ -27,26 +28,25 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 
 ## Struktura plików
 
-| Plik                 | Odpowiada za                                              |
-|-----------------------|------------------------------------------------------------|
-| `app.py`              | Punkt startowy, nagłówki bezpieczeństwa, serwowanie frontendu i dokumentacji |
-| `openapi.yaml`        | Specyfikacja API (OpenAPI 3.0) — źródło prawdy dla dokumentacji |
-| `SECURITY.md`         | Audyt bezpieczeństwa — weryfikacja 20 zabezpieczeń |
-| `PERFORMANCE.md`      | Pomiary wydajności, wprowadzone optymalizacje i ograniczenia |
-| `AI.md`               | Moduł kategoryzacji — działanie, skuteczność, ograniczenia |
-| `db.py`               | Schemat bazy danych, połączenie, zapis audytu              |
-| `auth.py`             | JWT, generowanie/weryfikacja tokenów, dekoratory RBAC      |
-| `rate_limit.py`       | Instancja Flask-Limiter (ograniczanie żądań)               |
-| `ai.py`               | Automatyczna kategoryzacja zgłoszeń                        |
-| `routes.py`           | Wszystkie punkty końcowe API                               |
-| `seed.py`             | Wypełnienie bazy danymi testowymi (hasła hashowane)        |
-| `demo.py`             | Skrypt sprawdzający E2E — weryfikuje całe API              |
-| `tests/`              | Testy jednostkowe i integracyjne (`pytest`)                |
-| `requirements-dev.txt`| Zależności potrzebne wyłącznie do testów                   |
-| `Dockerfile`          | Obraz kontenera, uruchomienie jako użytkownik bez uprawnień root |
-| `docker-compose.yml`  | Uruchomienie usługi z trwałym wolumenem i wymaganym SECRET_KEY |
-| `.env.example`        | Szablon zmiennych środowiskowych                           |
-| `frontend/`           | Interfejs użytkownika (HTML + CSS + JS)                    |
+| Ścieżka                | Odpowiada za                                              |
+|------------------------|------------------------------------------------------------|
+| `app/api/`             | Warstwa HTTP — trasy, walidacja żądań, obsługa błędów      |
+| `app/domain/`          | Reguły biznesowe — kategoryzacja AI, cykl życia zgłoszenia |
+| `app/data/`            | Dostęp do bazy — schemat, zapytania, migracje              |
+| `app/security/`        | Tokeny JWT i kontrola dostępu                              |
+| `app/config.py`        | Cała konfiguracja środowiskowa w jednym miejscu            |
+| `app/__init__.py`      | Fabryka aplikacji — nagłówki, kompresja, cache, HTTPS      |
+| `wsgi.py`              | Punkt wejścia dla gunicorna                                |
+| `deploy/nginx/`        | Konfiguracja odwrotnego proxy                              |
+| `openapi.yaml`         | Specyfikacja API — źródło prawdy dla dokumentacji          |
+| `ARCHITECTURE.md`      | Podział na warstwy, nginx, CI/CD                           |
+| `SECURITY.md`          | Audyt bezpieczeństwa — weryfikacja 20 zabezpieczeń         |
+| `PERFORMANCE.md`       | Pomiary wydajności i wprowadzone optymalizacje             |
+| `AI.md`                | Moduł kategoryzacji — działanie, skuteczność, ograniczenia |
+| `seed.py`              | Wypełnienie bazy danymi testowymi                          |
+| `demo.py`              | Testy E2E (adres przez `BASE_URL`)                         |
+| `tests/`               | Testy jednostkowe, integracyjne i architektoniczne         |
+| `frontend/`            | Interfejs użytkownika (HTML + CSS + JS)                    |
 
 ---
 
@@ -73,7 +73,8 @@ docker compose up --build
 docker compose exec helpdesk python seed.py
 ```
 
-Aplikacja będzie dostępna pod `http://localhost:5000`. Baza danych SQLite jest
+Aplikacja będzie dostępna pod **`http://localhost:8080`** (przez nginx).
+Sama aplikacja nie publikuje portu na host — ruch wchodzi wyłącznie przez proxy. Baza danych SQLite jest
 przechowywana w trwałym wolumenie `helpdesk-data` — dane przetrwają restart
 kontenera.
 
@@ -93,7 +94,7 @@ Wymagany **Python 3.8+**.
 cp .env.example .env          # ustaw SECRET_KEY
 py -m pip install -r requirements.txt
 py seed.py                    # tworzy i wypełnia bazę danymi testowymi
-py app.py                     # startuje serwer na http://127.0.0.1:5000
+py wsgi.py                    # startuje serwer na http://127.0.0.1:5000
 ```
 
 ---
@@ -110,8 +111,8 @@ py -m pytest
 
 | Warstwa | Liczba | Zakres |
 |---|---|---|
-| Jednostkowe | 65 | Kategoryzacja AI i jej skuteczność, tokeny JWT, maszyna stanów |
-| Integracyjne | 250 | Flask + baza: RBAC, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
+| Jednostkowe | 85 | Kategoryzacja AI i jej skuteczność, tokeny JWT, maszyna stanów |
+| Integracyjne | 252 | Flask + baza: RBAC, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
 | E2E (`demo.py`) | 21 | Pełny przepływ przez działający serwer |
 
 Testy uruchamiają się automatycznie przy każdym pull requeście
@@ -131,7 +132,7 @@ JWT, kategoryzację AI, przejścia statusów, ścieżkę audytu oraz testy negat
 (brak tokenu, podrobiony token, przekroczone limity długości, nieznany endpoint):
 
 ```bash
-py demo.py
+BASE_URL=http://localhost:8080 py demo.py
 ```
 
 Oczekiwany wynik:
@@ -144,15 +145,34 @@ Ręczne sprawdzenie endpointów (wymaga najpierw zalogowania się i pobrania tok
 
 ```bash
 # Zaloguj się i zapisz token
-TOKEN=$(curl -s -X POST http://localhost:5000/api/auth/login \
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"m.lewandowski","password":"tech123"}' \
   | python -c "import json,sys; print(json.load(sys.stdin)['token'])")
 
 # Użyj tokenu w nagłówku Authorization
-curl http://localhost:5000/api/dashboard \
+curl http://localhost:8080/api/dashboard \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+---
+
+## Architektura
+
+Projekt jest podzielony na warstwy o jednokierunkowych zależnościach:
+
+```
+api  ──>  domain,  data,  security      (warstwa HTTP)
+data ──>  tylko baza danych             (cały SQL)
+domain ──> nic z aplikacji              (reguły biznesowe)
+```
+
+Uruchomienie produkcyjne: **nginx** jako odwrotne proxy przed **gunicornem**.
+Aplikacja nie jest wystawiona bezpośrednio.
+
+Podział jest **egzekwowany testami** — `tests/test_architektura.py` sprawdza
+m.in., że w warstwie HTTP nie ma SQL-a, a warstwa domenowa nie importuje
+Flaska. Pełny opis: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 ---
 
@@ -225,7 +245,7 @@ szczegółowe wyniki w pliku **[PERFORMANCE.md](PERFORMANCE.md)**.
 ## Punkty końcowe API
 
 **Pełna, interaktywna dokumentacja:** po uruchomieniu aplikacji dostępna pod
-adresem **`http://localhost:5000/api/docs`** (Swagger UI). Można z niej wysyłać
+adresem **`http://localhost:8080/api/docs`** (Swagger UI). Można z niej wysyłać
 prawdziwe żądania — wystarczy zalogować się przez `POST /auth/login`, skopiować
 token i wkleić go przyciskiem **Authorize**.
 

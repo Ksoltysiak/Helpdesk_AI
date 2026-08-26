@@ -25,19 +25,19 @@ jobs:
       # Warstwy 1 i 2 piramidy — bez uruchamiania serwera.
       - name: Testy jednostkowe i integracyjne
         env:
-          SECRET_KEY: klucz-tylko-do-testow-ci
+          SECRET_KEY: klucz-tylko-do-testow-ci-o-dlugosci-32-bajtow
         run: pytest --cov --cov-report=term-missing
 
       # Warstwa 3 — pelny przeplyw przez dzialajacy serwer.
       - name: Testy E2E przy dzialajacym serwerze
         env:
-          SECRET_KEY: klucz-tylko-do-testow-ci
+          SECRET_KEY: klucz-tylko-do-testow-ci-o-dlugosci-32-bajtow
           DB_PATH: /tmp/ci-helpdesk.db
         run: |
           python seed.py
-          gunicorn --bind 127.0.0.1:5000 app:app --daemon
+          gunicorn --bind 127.0.0.1:5000 wsgi:app --daemon
           for _ in $(seq 30); do
-            curl -sf http://127.0.0.1:5000/ >/dev/null && break
+            curl -sf http://127.0.0.1:5000/api/health >/dev/null && break
             sleep 1
           done
           python demo.py
@@ -60,27 +60,85 @@ jobs:
           pip install -r requirements.txt
           pip-audit --strict --desc
 
-  obraz-docker:
-    name: Budowa obrazu Docker
+  stos-docker:
+    name: Pelny stos (nginx + aplikacja)
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Budowa obrazu
-        run: docker build -t helpdesk-test .
+      # Sprawdzamy caly stos z docker compose, a nie sam obraz aplikacji:
+      # blad w konfiguracji nginx albo w polaczeniu miedzy uslugami nie
+      # ujawnilby sie przy uruchomieniu samego kontenera aplikacji.
+      - name: Uruchomienie stosu
+        env:
+          SECRET_KEY: klucz-tylko-do-testow-ci-o-dlugosci-32-bajtow
+        run: docker compose up -d --build
 
-      - name: Kontener startuje i odpowiada
+      - name: Czekanie na gotowosc przez nginx
         run: |
-          docker run -d --name helpdesk -p 5000:5000 \
-            -e SECRET_KEY=klucz-tylko-do-testow-ci helpdesk-test
-          for _ in $(seq 30); do
-            curl -sf http://127.0.0.1:5000/ >/dev/null && break
-            sleep 1
+          for _ in $(seq 60); do
+            curl -sf http://127.0.0.1:8080/api/health >/dev/null && break
+            sleep 2
           done
-          curl -sf http://127.0.0.1:5000/ >/dev/null
-          docker exec helpdesk whoami | grep -qx app  # nie moze dzialac jako root
-          # Dokumentacja API musi byc czescia obrazu, nie tylko repozytorium.
-          curl -sf http://127.0.0.1:5000/api/openapi.yaml | grep -q "openapi:"
-          curl -sf http://127.0.0.1:5000/api/docs/ >/dev/null
-          docker rm -f helpdesk
+          curl -sf http://127.0.0.1:8080/api/health | grep -q '"ok"'
+
+      - name: Aplikacja nie dziala jako root
+        run: docker compose exec -T helpdesk whoami | grep -qx app
+
+      - name: Dokumentacja API jest czescia obrazu
+        run: |
+          curl -sf http://127.0.0.1:8080/api/openapi.yaml | grep -q "openapi:"
+          curl -sf http://127.0.0.1:8080/api/docs/ >/dev/null
+
+      - name: Nginx przekazuje adres klienta (X-Forwarded-For)
+        run: |
+          # Aplikacja za proxy musi widziec adres klienta, inaczej wszyscy
+          # uzytkownicy dziela jeden licznik limitu logowania.
+          docker compose exec -T helpdesk python -c "from app import config; assert config.TRUST_PROXY, 'TRUST_PROXY wylaczone za proxy'"
+
+      - name: Frontend jest serwowany przez nginx
+        run: curl -sf http://127.0.0.1:8080/ | grep -q "HelpDesk"
+
+      - name: Logi przy niepowodzeniu
+        if: failure()
+        run: docker compose logs --tail 60
+
+      - name: Sprzatanie
+        if: always()
+        run: docker compose down -v
+
+  publikacja-obrazu:
+    name: Publikacja obrazu (CD)
+    runs-on: ubuntu-latest
+    # Publikujemy dopiero, gdy wszystko powyzej przeszlo, i wylacznie
+    # z galezi main — pull requesty buduja obraz, ale go nie publikuja.
+    needs: [testy, bezpieczenstwo-zaleznosci, stos-docker]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Logowanie do rejestru GitHuba
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Budowa i publikacja
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # Znacznik z SHA pozwala wdrozyc dokladnie ten commit i wrocic
+          # do poprzedniego, gdy cos pojdzie nie tak.
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

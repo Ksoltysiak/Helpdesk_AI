@@ -313,7 +313,7 @@ def test_skutecznosc_pokazuje_kierunek_pomylek(client, technik):
 
 def test_skutecznosc_bez_zgloszen_nie_dzieli_przez_zero(client, technik, app):
     import sqlite3
-    import db as db_module
+    from app import config as db_module
     conn = sqlite3.connect(db_module.DB_PATH)
     conn.execute("DELETE FROM audit_log")
     conn.execute("DELETE FROM notes")

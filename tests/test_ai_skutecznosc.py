@@ -7,7 +7,7 @@ pogorszenie skuteczności zatrzyma budowanie, tak samo jak zwykły błąd.
 
 import pytest
 
-from ai import categorize, PROG_PEWNOSCI, _bez_diakrytykow
+from app.domain.ai import categorize, PROG_PEWNOSCI, _bez_diakrytykow
 from zbior_ewaluacyjny import ZBIOR, NIEROZPOZNAWALNE
 
 pytestmark = pytest.mark.unit
@@ -97,14 +97,14 @@ def test_wiecej_przeslanek_to_wieksza_pewnosc():
 def test_skala_awarii_podnosi_priorytet():
     jedna_osoba = categorize("Brak internetu", "Nie mam dostępu do internetu")
     caly_dzial = categorize("Brak internetu", "Cały dział nie ma dostępu do internetu")
-    from ai import _RANGA
+    from app.domain.ai import _RANGA
     assert _RANGA[caly_dzial["priorytet"]] > _RANGA[jedna_osoba["priorytet"]]
 
 
 def test_pilnosc_podnosi_priorytet():
     zwykle = categorize("Problem z laptopem", "Laptop działa wolno")
     pilne = categorize("Problem z laptopem", "Laptop w ogóle nie włącza się, pilne")
-    from ai import _RANGA
+    from app.domain.ai import _RANGA
     assert _RANGA[pilne["priorytet"]] > _RANGA[zwykle["priorytet"]]
 
 

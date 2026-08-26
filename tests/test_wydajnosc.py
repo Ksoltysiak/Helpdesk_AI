@@ -9,7 +9,8 @@ import sqlite3
 
 import pytest
 
-import db as db_module
+from app import config as db_module
+from app.data import database
 
 pytestmark = pytest.mark.integration
 
@@ -134,8 +135,8 @@ def test_lista_pracownika_korzysta_z_indeksu(app):
 
 def test_init_db_mozna_wywolac_wielokrotnie(app):
     """Uruchamiane przy kazdym starcie kontenera — musi byc idempotentne."""
-    db_module.init_db()
-    db_module.init_db()
+    database.init_db()
+    database.init_db()
     conn = sqlite3.connect(db_module.DB_PATH)
     liczba = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     conn.close()
@@ -181,7 +182,7 @@ def test_migracja_dodaje_brakujaca_kolumne_do_istniejacej_bazy(tmp_path, monkeyp
     assert "ai_pewnosc" not in kolumny_przed, "Zalozenie testu: stara baza nie ma kolumny"
 
     monkeypatch.setattr(db_module, "DB_PATH", str(stara))
-    db_module.init_db()
+    database.init_db()
 
     conn = sqlite3.connect(stara)
     kolumny_po = {w[1] for w in conn.execute("PRAGMA table_info(tickets)")}
@@ -350,14 +351,30 @@ def test_health_nie_podlega_limitowi_zadan(rate_limited_client):
     assert all(k == 200 for k in kody)
 
 
-def test_health_zglasza_503_gdy_baza_nie_odpowiada(client, monkeypatch):
-    """Sonda ma wykryc awarie bazy, a nie raportowac 'ok' mimo problemu."""
-    import routes
+def test_sprawdzenie_polaczenia_wykrywa_awarie_bazy(app, monkeypatch):
+    """Funkcja kontrolna ma zwrocic False, a nie rzucic wyjatkiem —
+    inaczej sonda dostalaby 500 zamiast czytelnego 503."""
+    from app.data import database
 
-    def zepsuta_baza():
+    def zepsute_polaczenie():
         raise sqlite3.OperationalError("unable to open database file")
 
-    monkeypatch.setattr(routes, "get_db", zepsuta_baza)
+    monkeypatch.setattr(database, "get_db", zepsute_polaczenie)
+    with app.app_context():
+        assert database.sprawdz_polaczenie() is False
+
+
+def test_sprawdzenie_polaczenia_potwierdza_dzialajaca_baze(app):
+    from app.data import database
+    with app.app_context():
+        assert database.sprawdz_polaczenie() is True
+
+
+def test_health_zglasza_503_gdy_baza_nie_odpowiada(client, monkeypatch):
+    """Sonda ma wykryc awarie bazy, a nie raportowac 'ok' mimo problemu."""
+    from app.api import meta
+
+    monkeypatch.setattr(meta, "sprawdz_polaczenie", lambda: False)
 
     resp = client.get("/api/health")
     assert resp.status_code == 503
@@ -366,12 +383,9 @@ def test_health_zglasza_503_gdy_baza_nie_odpowiada(client, monkeypatch):
 
 def test_health_nie_ujawnia_przyczyny_awarii(client, monkeypatch):
     """Komunikat bledu bazy nie moze trafic do niezalogowanego klienta."""
-    import routes
+    from app.api import meta
 
-    def zepsuta_baza():
-        raise sqlite3.OperationalError("/tajna/sciezka/helpdesk.db is locked")
-
-    monkeypatch.setattr(routes, "get_db", zepsuta_baza)
+    monkeypatch.setattr(meta, "sprawdz_polaczenie", lambda: False)
 
     tresc = client.get("/api/health").get_data(as_text=True)
     assert "tajna" not in tresc and "locked" not in tresc

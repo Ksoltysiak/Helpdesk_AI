@@ -12,9 +12,10 @@ import re
 import pytest
 import yaml
 
-from ai import CATEGORIES, SLA_HOURS
-from routes import TRANSITIONS
-import db as db_module
+from app.domain.ai import CATEGORIES, SLA_HOURS
+from app.domain.tickets import TRANSITIONS
+from app import config as db_module
+from app.data import database
 
 pytestmark = pytest.mark.integration
 
@@ -32,11 +33,23 @@ def spec():
         return yaml.safe_load(f)
 
 
+# Trasy pod /api/, ktore NIE sa czescia API dla klientow — dokumentacja
+# opisuje sama siebie i nie ma jej w specyfikacji.
+_POZA_SPECYFIKACJA = ("/api/docs", "/api/openapi.yaml")
+
+
 def _sciezki_flaska(app):
-    """Sciezki i metody blueprintu API, w notacji OpenAPI."""
+    """Sciezki i metody API, w notacji OpenAPI.
+
+    Filtrujemy po SCIEZCE, a nie po nazwie blueprintu: warstwa HTTP jest
+    podzielona na kilka blueprintow (auth, tickets, meta), a podzial moze sie
+    jeszcze zmienic. Sciezka /api/ jest stabilnym kryterium.
+    """
     znalezione = {}
     for rule in app.url_map.iter_rules():
-        if not rule.endpoint.startswith("api."):
+        if not rule.rule.startswith("/api/"):
+            continue
+        if rule.rule.startswith(_POZA_SPECYFIKACJA):
             continue
         sciezka = _PARAM.sub(r"{\1}", rule.rule)
         sciezka = sciezka[len("/api"):] or "/"
@@ -182,7 +195,7 @@ def test_lista_priorytetow_odpowiada_tabeli_sla(spec):
 def test_lista_rol_odpowiada_schematowi_bazy(spec):
     """Role sa ograniczone warunkiem CHECK w schemacie tabeli users."""
     dozwolone = set(re.findall(r"role\s+TEXT\s+NOT NULL\s+CHECK\(role IN \(([^)]+)\)",
-                               db_module.SCHEMA)[0].replace("'", "").split(","))
+                               database.SCHEMA)[0].replace("'", "").split(","))
     assert set(spec["components"]["schemas"]["Rola"]["enum"]) == {r.strip() for r in dozwolone}
 
 
@@ -236,16 +249,16 @@ def test_schemat_logowania_odpowiada_odpowiedzi(client, spec):
 
 def test_udokumentowane_limity_dlugosci_odpowiadaja_walidacji(spec):
     """Limity w dokumentacji musza byc tymi samymi, ktore egzekwuje kod."""
-    import routes
+    from app import config
 
     body = spec["paths"]["/tickets"]["post"]["requestBody"]["content"]["application/json"]
     wlasciwosci = body["schema"]["properties"]
-    assert wlasciwosci["title"]["maxLength"] == routes._TITLE_MAX
-    assert wlasciwosci["description"]["maxLength"] == routes._DESC_MAX
+    assert wlasciwosci["title"]["maxLength"] == config.TITLE_MAX
+    assert wlasciwosci["description"]["maxLength"] == config.DESC_MAX
 
     notatka = spec["paths"]["/tickets/{ticket_id}/notes"]["post"]["requestBody"]
     schemat_notatki = notatka["content"]["application/json"]["schema"]["properties"]
-    assert schemat_notatki["content"]["maxLength"] == routes._NOTE_MAX
+    assert schemat_notatki["content"]["maxLength"] == config.NOTE_MAX
 
 
 # ---------------------------------------------------------------

@@ -1,17 +1,40 @@
 services:
   helpdesk:
     build: .
-    ports:
-      - "5000:5000"
+    # Port NIE jest publikowany na host — ruch wchodzi wyłącznie przez nginx.
+    # Aplikacja jest osiągalna tylko w sieci wewnętrznej compose.
+    expose:
+      - "5000"
     volumes:
       - helpdesk-data:/app/data
     environment:
       - DB_PATH=/app/data/helpdesk.db
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY env var before starting}
-      # Opcjonalne — opis w .env.example. Puste = wylaczone.
+      # Aplikacja stoi za nginx, więc prawdziwy adres klienta jest
+      # w X-Forwarded-For. Bez tego wszyscy dzielą jeden licznik limitu.
+      - TRUST_PROXY=1
+      # Opcjonalne — opis w .env.example. Puste = wyłączone.
       - FORCE_HTTPS=${FORCE_HTTPS:-}
-      - TRUST_PROXY=${TRUST_PROXY:-}
       - RATELIMIT_STORAGE_URI=${RATELIMIT_STORAGE_URI:-}
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=3).status==200 else sys.exit(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      helpdesk:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   helpdesk-data:

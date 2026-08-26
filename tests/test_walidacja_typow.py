@@ -117,7 +117,7 @@ def test_token_z_nieliczbowym_identyfikatorem_jest_odrzucany(client):
     """Poprawnie podpisany token, ale 'sub' nie jest liczba — brak tozsamosci."""
     import time
     import jwt
-    import auth
+    from app import config as auth
 
     podrobiony = jwt.encode(
         {"sub": "nie-liczba", "iat": int(time.time()), "exp": int(time.time()) + 3600},

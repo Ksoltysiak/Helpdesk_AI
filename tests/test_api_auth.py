@@ -30,7 +30,7 @@ def test_odpowiedz_logowania_nie_ujawnia_hasla(client):
 
 def test_haslo_jest_hashowane_w_bazie(app):
     """Baza nie moze przechowywac hasla otwartym tekstem."""
-    import db as db_module
+    from app import config as db_module
     import sqlite3
 
     conn = sqlite3.connect(db_module.DB_PATH)
@@ -108,7 +108,7 @@ def test_niepoprawny_naglowek_autoryzacji_daje_401(client, naglowek):
 
 def test_token_dla_usunietego_uzytkownika_jest_odrzucany(client, app):
     """Token moze byc poprawnie podpisany, ale uzytkownik juz nie istnieje."""
-    from auth import generate_token
+    from app.security.tokens import generate_token
 
     resp = client.get("/api/tickets", headers=auth_header(generate_token(9999)))
     assert resp.status_code == 401
@@ -118,7 +118,7 @@ def test_wygasly_token_jest_odrzucany_przez_api(client):
     """Sciezka wygasniecia musi konczyc sie 401, a nie bledem serwera."""
     import time
     import jwt
-    import auth
+    from app import config as auth
 
     wygasly = jwt.encode(
         {"sub": 1, "iat": int(time.time()) - 7200, "exp": int(time.time()) - 3600},
@@ -131,7 +131,7 @@ def test_token_bez_identyfikatora_uzytkownika_jest_odrzucany(client):
     """Poprawnie podpisany token, ale bez pola 'sub' — brak tozsamosci."""
     import time
     import jwt
-    import auth
+    from app import config as auth
 
     bez_sub = jwt.encode(
         {"iat": int(time.time()), "exp": int(time.time()) + 3600},

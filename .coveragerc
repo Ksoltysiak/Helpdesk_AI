@@ -7,6 +7,8 @@ omit =
     # seed.py sluzy do wypelnienia bazy danymi startowymi.
     demo.py
     seed.py
+    # Punkt wejscia dla serwera WSGI — sam nie zawiera logiki.
+    wsgi.py
 
 [report]
 show_missing = True
