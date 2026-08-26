@@ -3,16 +3,16 @@
 Dokument opisuje zestaw testów automatycznych projektu: strukturę, zakres,
 sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
 
-**Stan na dzień:** 24 sierpnia 2026
+**Stan na dzień:** 26 sierpnia 2026
 
 | Miara | Wartość |
 |---|---|
-| Testy `pytest` | **229** (36 jednostkowych + 193 integracyjne) |
+| Testy `pytest` | **275** (36 jednostkowych + 239 integracyjnych) |
 | Testy E2E (`demo.py`) | **21** sprawdzeń |
-| Łącznie automatycznych sprawdzeń | **250** |
-| Pokrycie kodu aplikacji | **100%** (359 instrukcji, 0 pominiętych) |
-| Czas wykonania `pytest` | ~19 s |
-| Wynik ostatniego przebiegu | 229 passed, 0 failed |
+| Łącznie automatycznych sprawdzeń | **296** |
+| Pokrycie kodu aplikacji | **100%** (421 instrukcji, 0 pominiętych) |
+| Czas wykonania `pytest` | ~38 s |
+| Wynik ostatniego przebiegu | 275 passed, 0 failed |
 
 ---
 
@@ -38,7 +38,7 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
                     │   E2E — demo.py       │   21 sprawdzeń
                     │   działający serwer   │   ~3 s
                     ├───────────────────────┤
-                │      Integracyjne         │   193 testy
+                │      Integracyjne         │   239 testow
                 │   Flask + baza danych     │   ~18 s
             ├───────────────────────────────────┤
         │          Jednostkowe                  │   36 testów
@@ -57,6 +57,7 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
 | Integracyjna | `tests/test_openapi.py` | 27 | Zgodność dokumentacji z implementacją |
 | Integracyjna | `tests/test_walidacja_typow.py` | 44 | Typy danych wejściowych, błędy w JSON |
 | Integracyjna | `tests/test_wdrozenie.py` | 12 | HTTPS, HSTS, proxy, siła klucza |
+| Integracyjna | `tests/test_wydajnosc.py` | 44 | Stronicowanie, indeksy, kompresja, cache, health |
 | E2E | `demo.py` | 21 | Pełny przepływ przez HTTP |
 
 **Uwaga o kształcie piramidy.** Warstwa integracyjna jest tu liczniejsza niż
@@ -145,6 +146,14 @@ liczbą, wartością logiczną, listą i obiektem (w tym `{"$ne": null}`). Wcze�
 takie dane kończyły się nieobsłużonym wyjątkiem i odpowiedzią HTTP 500 ze stroną
 HTML. Osobne testy pilnują, że treść wyjątku **nigdy** nie trafia do klienta
 oraz że błędy `/api/*` zawsze mają format JSON — także 405 i 500.
+
+**`test_wydajnosc.py`** — mechanizmy wprowadzone przy optymalizacji: poprawność
+stronicowania (żadne zgłoszenie nie ginie ani nie powtarza się między stronami,
+przy każdym rozmiarze strony), przycinanie parametrów spoza zakresu, **brak
+możliwości ominięcia izolacji danych przez przewijanie stron**, obecność indeksów
+sprawdzana przez `EXPLAIN QUERY PLAN`, tryb WAL, idempotentność `init_db()`,
+kompresja (z kontrolą, że po rozpakowaniu treść jest identyczna), nagłówki cache
+oraz kontrola zdrowia — łącznie z przypadkiem awarii bazy.
 
 **`test_wdrozenie.py`** — mechanizmy zależne od środowiska: przekierowanie na
 HTTPS i nagłówek HSTS po włączeniu `FORCE_HTTPS`, brak HSTS przy zwykłym HTTP

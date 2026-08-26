@@ -131,15 +131,36 @@ def test_metody_http_sie_zgadzaja(app, spec):
     assert not roznice, f"Rozjazd metod HTTP: {roznice}"
 
 
-def test_tylko_logowanie_jest_publiczne(spec):
-    """Kazda operacja poza logowaniem musi dziedziczyc wymog tokenu."""
-    publiczne = [
+def test_tylko_wyznaczone_operacje_sa_publiczne(spec):
+    """Zamkniety zbior operacji bez tokenu.
+
+    Publiczne moga byc wylacznie dwie rzeczy i obie z konkretnego powodu:
+    logowanie (token dopiero powstaje) oraz kontrola zdrowia (sonda load
+    balancera nie ma tokenu). Kazda inna operacja dziedziczy wymog autoryzacji
+    — dopisanie kolejnej zatrzyma ten test.
+    """
+    dozwolone = {"POST /auth/login", "GET /health"}
+
+    publiczne = {
         f"{metoda.upper()} {sciezka}"
         for sciezka, operacje in spec["paths"].items()
         for metoda, opis in operacje.items()
         if metoda in {"get", "post", "put", "patch", "delete"} and opis.get("security") == []
-    ]
-    assert publiczne == ["POST /auth/login"], f"Publiczne operacje: {publiczne}"
+    }
+    assert publiczne == dozwolone, f"Nieoczekiwane operacje publiczne: {publiczne ^ dozwolone}"
+
+
+def test_health_faktycznie_dziala_bez_tokenu(client):
+    """Deklaracja w specyfikacji musi zgadzac sie z zachowaniem aplikacji."""
+    resp = client.get("/api/health")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"status": "ok"}
+
+
+def test_health_nie_ujawnia_szczegolow_systemu(client):
+    """Endpoint bez autoryzacji nie moze zdradzac wersji, sciezek ani liczb."""
+    dane = client.get("/api/health").get_json()
+    assert set(dane) == {"status"}
 
 
 # ---------------------------------------------------------------

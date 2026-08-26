@@ -59,6 +59,37 @@ security:
 paths:
 
   # ---------------------------------------------------------------
+  /health:
+    get:
+      tags: [Pulpit i AI]
+      summary: Kontrola zdrowia usługi
+      description: |
+        Przeznaczone dla load balancera i monitoringu — **nie wymaga tokenu**,
+        ponieważ sonda infrastruktury go nie posiada. Nie jest objęte limitem
+        żądań.
+
+        Odpowiedź nie zawiera żadnych szczegółów o systemie: potwierdza jedynie,
+        że proces odpowiada i ma działające połączenie z bazą danych.
+      security: []
+      responses:
+        "200":
+          description: Usługa działa poprawnie
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok], example: ok }
+        "503":
+          description: Brak połączenia z bazą danych
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [error], example: error }
+
+  # ---------------------------------------------------------------
   /auth/login:
     post:
       tags: [Uwierzytelnianie]
@@ -144,7 +175,14 @@ paths:
     get:
       tags: [Pulpit i AI]
       summary: Statystyki i rozkład kategorii
-      description: Dane zbiorcze dla całego systemu (nie są filtrowane wg roli).
+      description: |
+        **Zakres zależy od roli**, tak samo jak lista zgłoszeń:
+
+        - **pracownik** — statystyki wyłącznie jego własnych zgłoszeń,
+        - **technik / admin** — dane zbiorcze całego systemu.
+
+        Dzięki temu pulpit pokazuje to samo, co widoczna dla użytkownika lista,
+        a pracownik nie poznaje liczby zgłoszeń w całej organizacji.
       responses:
         "200":
           description: Statystyki
@@ -156,14 +194,19 @@ paths:
                 properties:
                   statystyki:
                     type: object
-                    required: [otwarte, w_trakcie, rozwiazane, krytyczne]
+                    required: [wszystkie, otwarte, w_trakcie, rozwiazane, zamkniete, krytyczne]
                     properties:
+                      wszystkie:
+                        type: integer
+                        description: Łączna liczba zgłoszeń w zakresie roli
+                        example: 18
                       otwarte:
                         type: integer
                         description: Wszystkie zgłoszenia poza zamkniętymi
                         example: 15
                       w_trakcie: { type: integer, example: 5 }
                       rozwiazane: { type: integer, example: 2 }
+                      zamkniete: { type: integer, example: 3 }
                       krytyczne:
                         type: integer
                         description: Priorytet krytyczny, jeszcze niezamknięte
@@ -192,6 +235,13 @@ paths:
           parametry filtrowania są dla niego ignorowane i **nie pozwalają**
           dosięgnąć cudzych zgłoszeń,
         - **technik / admin** — wszystkie zgłoszenia, z opcjonalnym filtrowaniem.
+
+        **Wyniki są stronicowane.** Domyślnie zwracane jest 50 zgłoszeń na
+        stronę, maksymalnie 200. Pole `total` oznacza liczbę **wszystkich**
+        pasujących zgłoszeń, a nie liczbę zwróconych w tej odpowiedzi.
+
+        Wartości spoza zakresu są przycinane do dozwolonych granic zamiast
+        powodować błąd (np. `per_page=9999` zadziała jak `per_page=200`).
       parameters:
         - name: status
           in: query
@@ -205,19 +255,39 @@ paths:
           in: query
           description: Tylko technik/admin
           schema: { $ref: "#/components/schemas/Kategoria" }
+        - name: page
+          in: query
+          description: Numer strony, liczony od 1
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          description: Liczba zgłoszeń na stronę
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
       responses:
         "200":
-          description: Lista zgłoszeń
+          description: Stronicowana lista zgłoszeń
           content:
             application/json:
               schema:
                 type: object
-                required: [total, tickets]
+                required: [total, page, per_page, pages, tickets]
                 properties:
                   total:
                     type: integer
-                    description: Liczba zwróconych zgłoszeń
-                    example: 19
+                    description: Liczba wszystkich pasujących zgłoszeń
+                    example: 1284
+                  page:
+                    type: integer
+                    description: Numer zwróconej strony
+                    example: 1
+                  per_page:
+                    type: integer
+                    description: Liczba zgłoszeń na stronę
+                    example: 50
+                  pages:
+                    type: integer
+                    description: Łączna liczba stron (minimum 1)
+                    example: 26
                   tickets:
                     type: array
                     items: { $ref: "#/components/schemas/Zgloszenie" }

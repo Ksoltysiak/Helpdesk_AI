@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
-python -c "from db import init_db, DB_PATH; import os; init_db() if not os.path.exists(DB_PATH) else None"
+# init_db() jest idempotentne (CREATE ... IF NOT EXISTS), wiec uruchamiamy je
+# przy kazdym starcie — dzieki temu istniejaca baza dostaje brakujace indeksy
+# bez osobnego kroku migracji.
+python -c "from db import init_db; init_db()"
 
 exec "$@"

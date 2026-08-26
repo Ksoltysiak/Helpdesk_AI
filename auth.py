@@ -59,7 +59,11 @@ def current_user():
         uid = int(uid)
     except (TypeError, ValueError):
         return None
-    return get_db().execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
+    # Tylko potrzebne kolumny — hash hasla nie ma powodu krazyc po aplikacji
+    # przy kazdym uwierzytelnionym zadaniu.
+    return get_db().execute(
+        "SELECT id, username, name, role, email FROM users WHERE id = ?", (uid,)
+    ).fetchone()
 
 
 def login_required(f):

@@ -1,6 +1,7 @@
 from flask import Flask, send_from_directory, jsonify, request, redirect
 from flask_swagger_ui import get_swaggerui_blueprint
 from werkzeug.middleware.proxy_fix import ProxyFix
+import gzip
 import os
 from db import close_db, init_db, DB_PATH
 from routes import api
@@ -11,6 +12,13 @@ FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
 DOCS_URL = "/api/docs"
 SPEC_URL = "/api/openapi.yaml"
+
+_MIN_BAJTOW_DO_KOMPRESJI = 1024   # ponizej tego narzut gzip przewaza nad zyskiem
+_TYPY_KOMPRESOWANE = {
+    "application/json", "application/yaml",
+    "text/html", "text/css", "text/javascript", "application/javascript",
+    "image/svg+xml",
+}
 
 
 def _wlaczone(nazwa):
@@ -50,6 +58,36 @@ def create_app():
     @app.route(SPEC_URL)
     def openapi_spec():
         return send_from_directory(BASE_DIR, "openapi.yaml", mimetype="application/yaml")
+
+    @app.after_request
+    def kompresuj(response):
+        """Kompresja gzip dla odpowiedzi tekstowych.
+
+        Odpowiedzi JSON i pliki frontendu skladaja sie z powtarzalnego tekstu
+        i kompresuja sie bardzo dobrze — to najwiekszy pojedynczy zysk dla
+        uzytkownikow na wolnym laczu.
+        """
+        if (
+            response.direct_passthrough
+            or response.status_code < 200
+            or response.status_code >= 300
+            or "Content-Encoding" in response.headers
+            or response.content_length is None
+            or response.content_length < _MIN_BAJTOW_DO_KOMPRESJI
+            or "gzip" not in request.headers.get("Accept-Encoding", "")
+        ):
+            return response
+
+        typ = (response.content_type or "").split(";")[0]
+        if typ not in _TYPY_KOMPRESOWANE:
+            return response
+
+        dane = gzip.compress(response.get_data(), compresslevel=6)
+        response.set_data(dane)
+        response.headers["Content-Encoding"] = "gzip"
+        response.headers["Content-Length"] = str(len(dane))
+        response.headers.add("Vary", "Accept-Encoding")
+        return response
 
     @app.after_request
     def security_headers(response):
@@ -103,6 +141,20 @@ def create_app():
         if request.path.startswith("/api/"):
             return jsonify({"error": "Blad wewnetrzny serwera"}), 500
         return "Blad wewnetrzny serwera", 500
+
+    @app.after_request
+    def naglowki_cache(response):
+        """Dane zgloszen nie moga byc cache'owane, pliki statyczne powinny.
+
+        Odpowiedz API zapisana w cache przegladarki mogłaby zostac pokazana
+        innemu uzytkownikowi tej samej przegladarki po wylogowaniu.
+        """
+        if request.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        elif request.path.rsplit(".", 1)[-1] in ("css", "js", "svg", "png", "ico", "woff2"):
+            # Pliki wersjonowane sa trescia — walidacja przez ETag Flaska.
+            response.headers["Cache-Control"] = "public, max-age=3600, must-revalidate"
+        return response
 
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")

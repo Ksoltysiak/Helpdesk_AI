@@ -5,8 +5,9 @@ testy sa od siebie niezalezne i nie dotykaja bazy deweloperskiej.
 """
 
 import os
-import sys
+import shutil
 import sqlite3
+import sys
 
 import pytest
 
@@ -81,14 +82,33 @@ def _seed(path):
     conn.close()
 
 
+@pytest.fixture(scope="session")
+def wzorzec_bazy(tmp_path_factory):
+    """Gotowa baza (schemat + indeksy + dane) budowana RAZ na cala sesje.
+
+    Tworzenie tabel i indeksow dla kazdego z ponad dwustu testow osobno
+    wyraznie wydluzalo przebieg. Skopiowanie gotowego pliku daje ten sam
+    efekt — kazdy test nadal dostaje wlasna, nietkniela baze.
+    """
+    sciezka = tmp_path_factory.mktemp("wzorzec") / "wzorzec.db"
+
+    poprzednia = db_module.DB_PATH
+    db_module.DB_PATH = str(sciezka)
+    try:
+        db_module.init_db()
+        _seed(str(sciezka))
+    finally:
+        db_module.DB_PATH = poprzednia
+
+    return sciezka
+
+
 @pytest.fixture
-def app(tmp_path, monkeypatch):
+def app(tmp_path, monkeypatch, wzorzec_bazy):
     """Aplikacja Flask ze swieza baza. Limiter wylaczony — wlacza go osobny test."""
     db_file = tmp_path / "test_helpdesk.db"
+    shutil.copyfile(wzorzec_bazy, db_file)
     monkeypatch.setattr(db_module, "DB_PATH", str(db_file))
-
-    db_module.init_db()
-    _seed(str(db_file))
 
     application = create_app()
     application.config.update(TESTING=True, RATELIMIT_ENABLED=False)

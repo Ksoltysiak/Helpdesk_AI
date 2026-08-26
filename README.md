@@ -15,6 +15,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 - [Testy](#testy)
 - [Weryfikacja działania](#weryfikacja-działania)
 - [Bezpieczeństwo](#bezpieczeństwo)
+- [Wydajność](#wydajność)
 - [Role użytkowników](#role-użytkowników)
 - [Punkty końcowe API](#punkty-końcowe-api)
 - [Cykl życia zgłoszenia](#cykl-życia-zgłoszenia-dozwolone-przejścia-statusów)
@@ -31,6 +32,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 | `app.py`              | Punkt startowy, nagłówki bezpieczeństwa, serwowanie frontendu i dokumentacji |
 | `openapi.yaml`        | Specyfikacja API (OpenAPI 3.0) — źródło prawdy dla dokumentacji |
 | `SECURITY.md`         | Audyt bezpieczeństwa — weryfikacja 20 zabezpieczeń |
+| `PERFORMANCE.md`      | Pomiary wydajności, wprowadzone optymalizacje i ograniczenia |
 | `db.py`               | Schemat bazy danych, połączenie, zapis audytu              |
 | `auth.py`             | JWT, generowanie/weryfikacja tokenów, dekoratory RBAC      |
 | `rate_limit.py`       | Instancja Flask-Limiter (ograniczanie żądań)               |
@@ -97,8 +99,8 @@ py app.py                     # startuje serwer na http://127.0.0.1:5000
 
 ## Testy
 
-Projekt ma zestaw **250 automatycznych sprawdzeń** w trzech warstwach
-(229 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
+Projekt ma zestaw **296 automatycznych sprawdzeń** w trzech warstwach
+(275 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
 
 ```bash
 py -m pip install -r requirements-dev.txt
@@ -108,7 +110,7 @@ py -m pytest
 | Warstwa | Liczba | Zakres |
 |---|---|---|
 | Jednostkowe | 36 | Kategoryzacja AI, tokeny JWT, maszyna stanów |
-| Integracyjne | 193 | Flask + baza: RBAC, walidacja typów, nagłówki, limity, HTTPS, zgodność dokumentacji |
+| Integracyjne | 239 | Flask + baza: RBAC, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
 | E2E (`demo.py`) | 21 | Pełny przepływ przez działający serwer |
 
 Testy uruchamiają się automatycznie przy każdym pull requeście
@@ -116,7 +118,8 @@ Testy uruchamiają się automatycznie przy każdym pull requeście
 
 Pełny opis — zakres każdej warstwy, raport pokrycia, weryfikacja mutacyjna
 i znane ograniczenia — znajduje się w pliku **[TESTING.md](TESTING.md)**.
-Wyniki audytu bezpieczeństwa: **[SECURITY.md](SECURITY.md)**.
+Wyniki audytu bezpieczeństwa: **[SECURITY.md](SECURITY.md)**,
+pomiary wydajności: **[PERFORMANCE.md](PERFORMANCE.md)**.
 
 ---
 
@@ -189,6 +192,25 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ---
 
+## Wydajność
+
+Back-end został zmierzony na **20 000 zgłoszeń** i zoptymalizowany —
+szczegółowe wyniki w pliku **[PERFORMANCE.md](PERFORMANCE.md)**.
+
+| Mechanizm | Efekt |
+|---|---|
+| Stronicowanie listy (`page`, `per_page`) | Odpowiedź 9 MB → 23 KB |
+| Indeksy bazy danych | Filtrowanie 8,5× szybsze |
+| Tryb WAL + `busy_timeout` | Odczyt równolegle z zapisem, brak „database is locked" |
+| Pulpit jednym zapytaniem | 5 zapytań → 1 |
+| Kompresja gzip | −95% rozmiaru odpowiedzi |
+| Nagłówki cache | Pliki statyczne cache'owane, dane API — nigdy |
+
+> Czas logowania (~100 ms) **nie jest** optymalizowany celowo — to koszt
+> hashowania `scrypt`, które ma być wolne, by utrudnić zgadywanie haseł.
+
+---
+
 ## Role użytkowników
 
 | Rola        | Uprawnienia                                                           |
@@ -213,6 +235,7 @@ orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
 
 | Metoda | Ścieżka                   | Rola          | Opis                                      |
 |--------|----------------------------|---------------|---------------------------------------------|
+| GET    | `/api/health`              | —             | Kontrola zdrowia (dla load balancera)       |
 | POST   | `/api/auth/login`          | —             | Logowanie — zwraca JWT token                |
 | GET    | `/api/auth/me`             | każdy         | Dane zalogowanego użytkownika (odtworzenie sesji) |
 | GET    | `/api/dashboard`           | każdy         | Statystyki + rozkład kategorii              |

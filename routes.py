@@ -21,6 +21,23 @@ _TITLE_MAX = 200
 _DESC_MAX  = 5000
 _NOTE_MAX  = 2000
 
+# Stronicowanie listy zgloszen. Bez gornego limitu pojedyncze zadanie moze
+# zmusic serwer do zbudowania odpowiedzi o rozmiarze calej bazy.
+_PER_PAGE_DOMYSLNIE = 50
+_PER_PAGE_MAX       = 200
+
+
+def parametr_calkowity(nazwa, domyslnie, minimum, maksimum):
+    """Odczyt liczbowego parametru zapytania z ograniczeniem zakresu."""
+    surowa = request.args.get(nazwa)
+    if surowa is None or surowa == "":
+        return domyslnie
+    try:
+        wartosc = int(surowa)
+    except (TypeError, ValueError):
+        return domyslnie
+    return max(minimum, min(wartosc, maksimum))
+
 
 def pole_tekstowe(dane, nazwa, maks):
     """Zwraca (wartosc, blad) dla pola tekstowego z zadania.
@@ -74,6 +91,22 @@ _TICKET_SELECT = """
 """
 
 
+@api.route("/health", methods=["GET"])
+@limiter.exempt
+def health():
+    """Kontrola zdrowia dla load balancera i monitoringu.
+
+    Celowo bez autoryzacji — sonda infrastruktury nie ma tokenu. Odpowiedz
+    nie zawiera zadnych szczegolow o systemie: potwierdza tylko, ze proces
+    zyje i ma dzialajace polaczenie z baza.
+    """
+    try:
+        get_db().execute("SELECT 1").fetchone()
+    except Exception:
+        return jsonify({"status": "error"}), 503
+    return jsonify({"status": "ok"})
+
+
 @api.route("/auth/login", methods=["POST"])
 @limiter.limit("10 per minute; 30 per hour")                              # na adres IP
 @limiter.limit("5 per minute; 20 per hour", key_func=klucz_logowania)     # na konto
@@ -107,15 +140,38 @@ def me():
 @login_required
 def dashboard():
     db = get_db()
-    stats = {
-        "otwarte":   db.execute("SELECT COUNT(*) c FROM tickets WHERE status != 'Zamkniete'").fetchone()["c"],
-        "w_trakcie": db.execute("SELECT COUNT(*) c FROM tickets WHERE status = 'W trakcie'").fetchone()["c"],
-        "rozwiazane":db.execute("SELECT COUNT(*) c FROM tickets WHERE status = 'Rozwiazane'").fetchone()["c"],
-        "krytyczne": db.execute("SELECT COUNT(*) c FROM tickets WHERE priority = 'Krytyczny' AND status != 'Zamkniete'").fetchone()["c"],
-    }
+
+    # Pracownik dostaje statystyki WLASNYCH zgloszen. Liczby z calego systemu
+    # nie sa mu do niczego potrzebne, a pulpit ma pokazywac to samo, co jego
+    # lista zgloszen.
+    if g.user["role"] == "pracownik":
+        where, params = " WHERE created_by = ?", (g.user["id"],)
+    else:
+        where, params = "", ()
+
+    # Jedno przejscie po tabeli zamiast czterech osobnych zapytan liczacych.
+    wiersz = db.execute(f"""
+        SELECT
+            COUNT(*)                                                AS wszystkie,
+            SUM(status != 'Zamkniete')                              AS otwarte,
+            SUM(status =  'W trakcie')                              AS w_trakcie,
+            SUM(status =  'Rozwiazane')                             AS rozwiazane,
+            SUM(status =  'Zamkniete')                              AS zamkniete,
+            SUM(priority = 'Krytyczny' AND status != 'Zamkniete')   AS krytyczne
+        FROM tickets{where}
+    """, params).fetchone()
+
+    # SUM() zwraca NULL dla pustego zbioru — pulpit ma pokazac zera.
+    klucze = ("wszystkie", "otwarte", "w_trakcie", "rozwiazane", "zamkniete", "krytyczne")
+    stats = {k: wiersz[k] or 0 for k in klucze}
+
     rows = db.execute(
-        "SELECT category, COUNT(*) c FROM tickets WHERE category IS NOT NULL GROUP BY category ORDER BY c DESC"
+        f"SELECT category, COUNT(*) c FROM tickets{where}"
+        + (" AND" if where else " WHERE") + " category IS NOT NULL"
+        " GROUP BY category ORDER BY c DESC",
+        params,
     ).fetchall()
+
     return jsonify({
         "statystyki":   stats,
         "wg_kategorii": [{"kategoria": r["category"], "liczba": r["c"]} for r in rows],
@@ -128,22 +184,42 @@ def list_tickets():
     db   = get_db()
     user = g.user
 
+    warunki = []
+    params  = []
+
     if user["role"] == "pracownik":
-        rows = db.execute(
-            _TICKET_SELECT + " WHERE t.created_by = ? ORDER BY t.id DESC", (user["id"],)
-        ).fetchall()
+        # Twarda granica dostepu — pracownik nigdy nie widzi cudzych zgloszen,
+        # a parametry filtrowania jej nie omijaja.
+        warunki.append("t.created_by = ?")
+        params.append(user["id"])
     else:
-        query  = _TICKET_SELECT + " WHERE 1=1"
-        params = []
         for field in ("status", "priority", "category"):
             value = request.args.get(field)
             if value:
-                query  += f" AND t.{field} = ?"
+                warunki.append(f"t.{field} = ?")
                 params.append(value)
-        query += " ORDER BY t.id DESC"
-        rows   = db.execute(query, params).fetchall()
 
-    return jsonify({"total": len(rows), "tickets": [serialize(t) for t in rows]})
+    where = (" WHERE " + " AND ".join(warunki)) if warunki else ""
+
+    # Liczba wszystkich pasujacych zgloszen — potrzebna do zbudowania stronicowania.
+    total = db.execute(f"SELECT COUNT(*) c FROM tickets t{where}", params).fetchone()["c"]
+
+    per_page = parametr_calkowity("per_page", _PER_PAGE_DOMYSLNIE, 1, _PER_PAGE_MAX)
+    stron    = max(1, -(-total // per_page))          # zaokraglenie w gore
+    page     = parametr_calkowity("page", 1, 1, stron)
+
+    rows = db.execute(
+        _TICKET_SELECT + where + " ORDER BY t.id DESC LIMIT ? OFFSET ?",
+        params + [per_page, (page - 1) * per_page],
+    ).fetchall()
+
+    return jsonify({
+        "total":    total,
+        "page":     page,
+        "per_page": per_page,
+        "pages":    stron,
+        "tickets":  [serialize(t) for t in rows],
+    })
 
 
 @api.route("/tickets", methods=["POST"])

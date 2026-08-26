@@ -11,6 +11,7 @@ let state = {
   currentView: 'dashboard',
   filterStatus: '',
   filterPriority: '',
+  page: 1,
 };
 
 const TRANSITIONS = {
@@ -93,7 +94,7 @@ function showLoginError(msg) {
 
 function doLogout() {
   state.userId = null; state.token = null; state.user = null; state.role = null;
-  state.filterStatus = ''; state.filterPriority = '';
+  state.filterStatus = ''; state.filterPriority = ''; state.page = 1;
   sessionStorage.removeItem('helpdesk_token');
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('app').classList.remove('visible');
@@ -151,6 +152,8 @@ function setupSidebar() {
 // NAVIGATION
 // ============================================================
 function navigate(view) {
+  // Zmiana widoku zawsze zaczyna od pierwszej strony.
+  if (state.currentView !== view) state.page = 1;
   state.currentView = view;
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.view === view)
@@ -177,6 +180,39 @@ function renderView(view) {
   }
 }
 
+// ============================================================
+// STRONICOWANIE
+// ============================================================
+function zmienStrone(nowa) {
+  state.page = nowa;
+  renderView(state.currentView);
+}
+
+function renderPaginacja(dane) {
+  if (dane.pages <= 1) return '';
+
+  const od = (dane.page - 1) * dane.per_page + 1;
+  const do_ = Math.min(dane.page * dane.per_page, dane.total);
+
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;
+                padding-top:1rem;margin-top:0.5rem;border-top:1px solid var(--color-border);
+                flex-wrap:wrap">
+      <div style="color:var(--color-text-muted);font-size:var(--text-sm)">
+        ${od}–${do_} z ${dane.total}
+      </div>
+      <div style="display:flex;align-items:center;gap:0.5rem">
+        <button class="btn btn-sm btn-secondary" ${dane.page <= 1 ? 'disabled' : ''}
+                onclick="zmienStrone(${dane.page - 1})">Poprzednia</button>
+        <span style="font-size:var(--text-sm);color:var(--color-text-muted)">
+          Strona ${dane.page} z ${dane.pages}
+        </span>
+        <button class="btn btn-sm btn-secondary" ${dane.page >= dane.pages ? 'disabled' : ''}
+                onclick="zmienStrone(${dane.page + 1})">Następna</button>
+      </div>
+    </div>`;
+}
+
 function spinner() {
   return `<div style="display:flex;align-items:center;justify-content:center;padding:3rem;color:var(--color-text-muted);gap:0.5rem">
     <svg class="ai-spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
@@ -194,10 +230,10 @@ async function renderDashboard() {
     if (isTechnik) {
       const [dash, ticketData] = await Promise.all([
         apiFetch('/dashboard'),
-        apiFetch('/tickets'),
+        apiFetch('/tickets?per_page=6'),   // pulpit pokazuje tylko ostatnie
       ]);
       const s = dash.statystyki;
-      const recent = ticketData.tickets.slice(0, 6);
+      const recent = ticketData.tickets;
       c.innerHTML = `
         <div style="margin-bottom:1.5rem">
           <h2 style="font-size:var(--text-lg);font-weight:700;margin-bottom:0.25rem">Konsola Obsługi IT</h2>
@@ -233,10 +269,17 @@ async function renderDashboard() {
           ${recent.length ? renderTicketTable(recent, true) : emptyState('Brak zgłoszeń w systemie.')}
         </div>`;
     } else {
-      const ticketData = await apiFetch('/tickets');
-      const tickets = ticketData.tickets;
-      const myOpen   = tickets.filter(t => t.status !== 'Zamkniete').length;
-      const myClosed = tickets.filter(t => t.status === 'Zamkniete').length;
+      // Liczniki pochodzą z backendu (zakres: własne zgłoszenia pracownika).
+      // Liczenie ich z pobranej listy dawałoby błędne wyniki, bo lista jest
+      // stronicowana i zawiera tylko pierwszą stronę.
+      const [dash, ticketData] = await Promise.all([
+        apiFetch('/dashboard'),
+        apiFetch('/tickets?per_page=5'),
+      ]);
+      const tickets  = ticketData.tickets;
+      const myOpen   = dash.statystyki.otwarte;
+      const myClosed = dash.statystyki.zamkniete;
+      const myTotal  = dash.statystyki.wszystkie;
       c.innerHTML = `
         <div style="margin-bottom:1.5rem">
           <h2 style="font-size:var(--text-lg);font-weight:700;margin-bottom:0.25rem">Witaj, ${escHtml(state.user.split(' ')[0])}! 👋</h2>
@@ -255,7 +298,7 @@ async function renderDashboard() {
           </div>
           <div class="card kpi-card">
             <div class="kpi-label">Łącznie</div>
-            <div class="kpi-value">${tickets.length}</div>
+            <div class="kpi-value">${myTotal}</div>
             <div class="kpi-sub">wszystkich zgłoszeń</div>
           </div>
         </div>
@@ -265,7 +308,7 @@ async function renderDashboard() {
             <button class="btn btn-sm btn-secondary" onclick="navigate('my-tickets')">Zobacz wszystkie</button>
           </div>
           ${tickets.length
-            ? renderTicketTable(tickets.slice(0, 5), false)
+            ? renderTicketTable(tickets, false)
             : `<div class="empty-state">
                 <div class="empty-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
                 <p>Nie masz jeszcze żadnych zgłoszeń.<br>Kliknij „Nowe zgłoszenie" aby zacząć.</p>
@@ -284,18 +327,18 @@ async function renderDashboard() {
 async function renderMyTickets() {
   const c = document.getElementById('mainContent');
   try {
-    const data = await apiFetch('/tickets');
+    const data = await apiFetch(`/tickets?page=${state.page}`);
     c.innerHTML = `
       <div class="card">
         <div class="section-header">
-          <div class="section-title">Moje zgłoszenia</div>
+          <div class="section-title">Moje zgłoszenia <span style="color:var(--color-text-muted);font-weight:400;font-size:var(--text-sm)">(${data.total})</span></div>
           <button class="btn btn-sm btn-primary" onclick="navigate('new-ticket')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Nowe zgłoszenie
           </button>
         </div>
         ${data.tickets.length
-          ? renderTicketTable(data.tickets, false)
+          ? renderTicketTable(data.tickets, false) + renderPaginacja(data)
           : `<div class="empty-state">
               <div class="empty-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div>
               <p>Nie masz jeszcze żadnych zgłoszeń.</p>
@@ -313,7 +356,7 @@ async function renderMyTickets() {
 async function renderAllTickets() {
   const c = document.getElementById('mainContent');
   try {
-    let url = '/tickets?_=1';
+    let url = `/tickets?page=${state.page}`;
     if (state.filterStatus)   url += `&status=${encodeURIComponent(state.filterStatus)}`;
     if (state.filterPriority) url += `&priority=${encodeURIComponent(state.filterPriority)}`;
     const data = await apiFetch(url);
@@ -324,7 +367,7 @@ async function renderAllTickets() {
           <div class="section-title">Wszystkie zgłoszenia <span style="color:var(--color-text-muted);font-weight:400;font-size:var(--text-sm)">(${data.total})</span></div>
         </div>
         <div class="filters">
-          <select class="filter-select" onchange="state.filterStatus=this.value;renderView('all-tickets')">
+          <select class="filter-select" onchange="state.filterStatus=this.value;state.page=1;renderView('all-tickets')">
             <option value="">Wszystkie statusy</option>
             <option value="Nowe"       ${state.filterStatus==='Nowe'      ?'selected':''}>Nowe</option>
             <option value="W trakcie"  ${state.filterStatus==='W trakcie' ?'selected':''}>W trakcie</option>
@@ -332,7 +375,7 @@ async function renderAllTickets() {
             <option value="Rozwiazane" ${state.filterStatus==='Rozwiazane'?'selected':''}>Rozwiązane</option>
             <option value="Zamkniete"  ${state.filterStatus==='Zamkniete' ?'selected':''}>Zamknięte</option>
           </select>
-          <select class="filter-select" onchange="state.filterPriority=this.value;renderView('all-tickets')">
+          <select class="filter-select" onchange="state.filterPriority=this.value;state.page=1;renderView('all-tickets')">
             <option value="">Wszystkie priorytety</option>
             <option value="Krytyczny" ${state.filterPriority==='Krytyczny'?'selected':''}>Krytyczny</option>
             <option value="Wysoki"    ${state.filterPriority==='Wysoki'   ?'selected':''}>Wysoki</option>
@@ -341,7 +384,7 @@ async function renderAllTickets() {
           </select>
         </div>
         ${data.tickets.length
-          ? renderTicketTable(data.tickets, true)
+          ? renderTicketTable(data.tickets, true) + renderPaginacja(data)
           : emptyState('Brak zgłoszeń spełniających wybrane kryteria.')}
       </div>`;
   } catch (e) {
