@@ -64,6 +64,13 @@ jobs:
     name: Pelny stos (nginx + aplikacja)
     runs-on: ubuntu-latest
 
+    # SECRET_KEY musi obowiazywac w CALYM zadaniu, nie tylko przy starcie.
+    # docker-compose.yml celowo wymaga tej zmiennej (${SECRET_KEY:?...}), wiec
+    # bez niej KAZDE kolejne polecenie compose — exec, logs, down — konczy sie
+    # bledem interpolacji, nawet jesli stos juz dziala.
+    env:
+      SECRET_KEY: klucz-tylko-do-testow-ci-o-dlugosci-32-bajtow
+
     steps:
       - uses: actions/checkout@v4
 
@@ -71,8 +78,6 @@ jobs:
       # blad w konfiguracji nginx albo w polaczeniu miedzy uslugami nie
       # ujawnilby sie przy uruchomieniu samego kontenera aplikacji.
       - name: Uruchomienie stosu
-        env:
-          SECRET_KEY: klucz-tylko-do-testow-ci-o-dlugosci-32-bajtow
         run: docker compose up -d --build
 
       - name: Czekanie na gotowosc przez nginx
