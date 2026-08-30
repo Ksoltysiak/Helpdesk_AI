@@ -148,6 +148,17 @@ def test_limit_na_konto_nie_blokuje_innych_uzytkownikow(rate_limited_client):
     assert inny.status_code == 200, "Limit dla jednego konta odcial inne konto"
 
 
+@pytest.mark.parametrize("login", [None, 123, {"a": 1}, ["x"]])
+def test_klucz_limitu_znosi_nietekstowy_login(app, login):
+    """Klient moze przyslac dowolny JSON — budowanie klucza limitu nie moze
+    sie na tym wywrocic, bo blad wystapilby PRZED walidacja danych."""
+    from app.extensions import klucz_logowania
+
+    with app.test_request_context("/api/auth/login", json={"username": login}):
+        klucz = klucz_logowania()
+    assert isinstance(klucz, str) and klucz.endswith("|")
+
+
 def test_limit_jest_faktycznie_wylaczony_w_zwyklych_testach(client):
     """REGRESJA: mechanizm wylaczania limitu przestal dzialac po cichu.
 

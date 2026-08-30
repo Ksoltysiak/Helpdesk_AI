@@ -29,20 +29,35 @@ DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "helpdesk.db"))
 # --- Klucz podpisujący tokeny -----------------------------------------
 MIN_DLUGOSC_KLUCZA = 32  # RFC 7518 sekcja 3.2 dla HMAC-SHA256
 
-SECRET_KEY = os.environ.get("SECRET_KEY")
-if not SECRET_KEY:
-    SECRET_KEY = "dev-only-insecure-key"
-    warnings.warn(
-        "SECRET_KEY env var not set — using insecure default. "
-        "Set SECRET_KEY in production.",
-        stacklevel=1,
-    )
-elif len(SECRET_KEY.encode()) < MIN_DLUGOSC_KLUCZA:
-    warnings.warn(
-        f"SECRET_KEY is shorter than {MIN_DLUGOSC_KLUCZA} bytes — weak signing key. "
-        f"Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"",
-        stacklevel=1,
-    )
+KLUCZ_DOMYSLNY = "dev-only-insecure-key"
+
+
+def rozstrzygnij_klucz(klucz):
+    """Zwraca (klucz_do_uzycia, ostrzezenie_albo_None).
+
+    Wydzielone z kodu wykonywanego przy imporcie, zeby dalo sie sprawdzic
+    kazdy przypadek zwyklym testem — bez przeladowywania modulu, ktore
+    nadpisywaloby stan wspoldzielony z reszta testow.
+    """
+    if not klucz:
+        return KLUCZ_DOMYSLNY, (
+            "SECRET_KEY env var not set — using insecure default. "
+            "Set SECRET_KEY in production."
+        )
+    if len(klucz.encode()) < MIN_DLUGOSC_KLUCZA:
+        return klucz, (
+            f"SECRET_KEY is shorter than {MIN_DLUGOSC_KLUCZA} bytes — weak signing key. "
+            f"Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    return klucz, None
+
+
+SECRET_KEY, _ostrzezenie = rozstrzygnij_klucz(os.environ.get("SECRET_KEY"))
+if _ostrzezenie:
+    # Sama tresc ostrzezenia jest sprawdzana testami `rozstrzygnij_klucz`,
+    # a jego faktyczne wyemitowanie — testami uruchamiajacymi interpreter
+    # w podprocesie (pokrycie nie siega do podprocesu).
+    warnings.warn(_ostrzezenie, stacklevel=1)  # pragma: no cover
 
 TOKEN_TTL = 8 * 3600  # ważność tokenu w sekundach
 

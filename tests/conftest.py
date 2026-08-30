@@ -140,32 +140,42 @@ def client(app):
     return app.test_client()
 
 
-def _login(client, username, password):
-    resp = client.post("/api/auth/login", json={"username": username, "password": password})
-    assert resp.status_code == 200, f"Logowanie {username} nie powiodlo sie: {resp.get_json()}"
-    return resp.get_json()["token"]
-
-
 def auth_header(token):
     return {"Authorization": f"Bearer {token}"}
+
+
+def _naglowek_dla(uzytkownik_id):
+    """Token wystawiony wprost, bez przechodzenia przez logowanie HTTP.
+
+    Wiekszosc testow potrzebuje po prostu tozsamosci, a nie sprawdzenia
+    logowania — to ostatnie ma wlasny, dokladny zestaw w `test_api_auth.py`.
+
+    Logowanie przez HTTP w kazdym z ponad trzystu testow miало dwa skutki
+    uboczne: kazdy test placil za kosztowne hashowanie scrypt, a caly przebieg
+    byl sprzezony ze wspoldzielonym licznikiem limitu zadan. Gdy limit bywal
+    aktywny, testy z konca przebiegu dostawaly 429 i wywracaly sie w losowych
+    miejscach.
+    """
+    from app.security.tokens import generate_token
+    return auth_header(generate_token(uzytkownik_id))
 
 
 @pytest.fixture
 def pracownik(client):
     """Token pracownika o id=1 (Katarzyna Nowak)."""
-    return auth_header(_login(client, "k.nowak", "haslo123"))
+    return _naglowek_dla(1)
 
 
 @pytest.fixture
 def pracownik2(client):
     """Token drugiego pracownika o id=2 — do testow izolacji danych."""
-    return auth_header(_login(client, "p.wisniewski", "haslo123"))
+    return _naglowek_dla(2)
 
 
 @pytest.fixture
 def technik(client):
     """Token technika o id=3 (Marek Lewandowski)."""
-    return auth_header(_login(client, "m.lewandowski", "tech123"))
+    return _naglowek_dla(3)
 
 
 @pytest.fixture

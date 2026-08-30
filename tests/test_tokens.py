@@ -75,6 +75,46 @@ def test_token_wygasly_jest_odrzucany():
         _decode(wygasly)
 
 
+def test_drobny_rozjazd_zegara_nie_odrzuca_tokenu():
+    """Token wystawiony "kilka sekund w przyszlosci" musi byc nadal wazny.
+
+    Bez tolerancji zegara uzytkownik dostawalby 401 mimo poprawnego
+    logowania, gdy zegar weryfikujacego jest minimalnie do tylu.
+    """
+    import time as _t
+    from app.security.tokens import id_uzytkownika_z_tokenu
+
+    przyszly = jwt.encode(
+        {"sub": "7", "iat": int(_t.time()) + 5, "exp": int(_t.time()) + 3600},
+        config.SECRET_KEY, algorithm="HS256",
+    )
+    assert id_uzytkownika_z_tokenu(przyszly) == 7
+
+
+def test_duzy_rozjazd_zegara_nadal_odrzuca_token():
+    """Tolerancja ma byc waska — token z odlegla data wystawienia to nie
+    rozjazd zegara, tylko token spreparowany."""
+    import time as _t
+    from app.security.tokens import id_uzytkownika_z_tokenu
+
+    daleki = jwt.encode(
+        {"sub": "7", "iat": int(_t.time()) + 600, "exp": int(_t.time()) + 3600},
+        config.SECRET_KEY, algorithm="HS256",
+    )
+    assert id_uzytkownika_z_tokenu(daleki) is None
+
+
+def test_token_wygasly_dawno_jest_odrzucany_mimo_tolerancji():
+    import time as _t
+    from app.security.tokens import id_uzytkownika_z_tokenu
+
+    wygasly = jwt.encode(
+        {"sub": "7", "iat": int(_t.time()) - 7200, "exp": int(_t.time()) - 3600},
+        config.SECRET_KEY, algorithm="HS256",
+    )
+    assert id_uzytkownika_z_tokenu(wygasly) is None
+
+
 def test_ciag_niebedacy_tokenem_jest_odrzucany():
     with pytest.raises(jwt.InvalidTokenError):
         _decode("to-nie-jest-token")
