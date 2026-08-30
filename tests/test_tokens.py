@@ -9,13 +9,14 @@ import time
 import jwt
 import pytest
 
-import auth
+from app import config
+from app.security import tokens
 
 pytestmark = pytest.mark.unit
 
 
 def _decode(token, key=None):
-    return jwt.decode(token, key or auth.SECRET_KEY, algorithms=["HS256"])
+    return jwt.decode(token, key or config.SECRET_KEY, algorithms=["HS256"])
 
 
 # ---------------------------------------------------------------
@@ -24,21 +25,21 @@ def _decode(token, key=None):
 
 def test_token_zawiera_identyfikator_uzytkownika():
     """RFC 7519 wymaga, by 'sub' bylo tekstem — PyJWT to egzekwuje."""
-    assert _decode(auth.generate_token(42))["sub"] == "42"
+    assert _decode(tokens.generate_token(42))["sub"] == "42"
 
 
 def test_token_ma_date_wystawienia_i_wygasniecia():
-    payload = _decode(auth.generate_token(1))
+    payload = _decode(tokens.generate_token(1))
     assert payload["exp"] > payload["iat"]
 
 
 def test_token_wygasa_po_osmiu_godzinach():
-    payload = _decode(auth.generate_token(1))
+    payload = _decode(tokens.generate_token(1))
     assert payload["exp"] - payload["iat"] == 8 * 3600
 
 
 def test_tokeny_roznych_uzytkownikow_sa_rozne():
-    assert auth.generate_token(1) != auth.generate_token(2)
+    assert tokens.generate_token(1) != tokens.generate_token(2)
 
 
 # ---------------------------------------------------------------
@@ -58,7 +59,7 @@ def test_token_podpisany_innym_kluczem_jest_odrzucany():
 
 
 def test_token_z_naruszonym_podpisem_jest_odrzucany():
-    token = auth.generate_token(1)
+    token = tokens.generate_token(1)
     naruszony = token[:-4] + ("aaaa" if not token.endswith("aaaa") else "bbbb")
     with pytest.raises(jwt.InvalidTokenError):
         _decode(naruszony)
@@ -67,7 +68,7 @@ def test_token_z_naruszonym_podpisem_jest_odrzucany():
 def test_token_wygasly_jest_odrzucany():
     wygasly = jwt.encode(
         {"sub": 1, "iat": int(time.time()) - 7200, "exp": int(time.time()) - 3600},
-        auth.SECRET_KEY,
+        config.SECRET_KEY,
         algorithm="HS256",
     )
     with pytest.raises(jwt.ExpiredSignatureError):
@@ -105,7 +106,7 @@ def test_brak_secret_key_ostrzega_i_nie_przechodzi_bezszelestnie():
     env["PYTHONPATH"] = root
 
     wynik = subprocess.run(
-        [sys.executable, "-W", "always", "-c", "import auth; print(auth.SECRET_KEY)"],
+        [sys.executable, "-W", "always", "-c", "from app import config; print(config.SECRET_KEY)"],
         capture_output=True, text=True, cwd=root, env=env,
     )
 

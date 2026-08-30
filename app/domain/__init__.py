@@ -1,0 +1,1 @@
+"""Warstwa domain."""

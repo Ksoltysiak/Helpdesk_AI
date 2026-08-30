@@ -2,7 +2,13 @@ __pycache__/
 *.pyc
 helpdesk.db
 .env
-data/
+
+# Katalog danych wolumenu Dockera — WYLACZNIE w korzeniu repozytorium.
+#
+# Ukosnik na poczatku jest istotny: wzorzec "data/" bez niego pasuje do
+# KAZDEGO katalogu o tej nazwie na dowolnym poziomie i po cichu wykluczyl
+# z repozytorium cala warstwe app/data/. Git nie zglasza takiego pominiecia.
+/data/
 
 # Artefakty testow
 .pytest_cache/

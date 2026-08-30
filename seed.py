@@ -3,8 +3,9 @@ import os
 import json
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash
-from db import DB_PATH, init_db
-from ai import categorize, SLA_HOURS
+from app import config
+from app.data.database import init_db
+from app.domain.ai import categorize, SLA_HOURS
 
 USERS = [
     ("k.nowak",       "haslo123", "Katarzyna Nowak",    "pracownik", "k.nowak@firma.pl"),
@@ -42,11 +43,11 @@ TICKETS = [
 
 
 def seed():
-    if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
+    if os.path.exists(config.DB_PATH):
+        os.remove(config.DB_PATH)
     init_db()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(config.DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
 
     for username, password, name, role, email in USERS:
@@ -66,10 +67,10 @@ def seed():
         tid = conn.execute(
             """INSERT INTO tickets
                (title, description, category, priority, status, created_by, assigned_to,
-                ai_categorized, sla_deadline, created_at, updated_at, closed_at)
-               VALUES (?,?,?,?,?,?,?,1,?,?,?,?)""",
+                ai_categorized, ai_pewnosc, sla_deadline, created_at, updated_at, closed_at)
+               VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?)""",
             (title, desc, ai["kategoria"], ai["priorytet"], status, created_by, assigned_to,
-             deadline, created, created, closed),
+             ai["pewnosc"], deadline, created, created, closed),
         ).lastrowid
 
         conn.execute(

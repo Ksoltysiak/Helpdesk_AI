@@ -1,6 +1,6 @@
 # Zaleznosci wylacznie do testow — nie trafiaja do obrazu produkcyjnego.
 -r requirements.txt
 pytest==8.3.3
-pytest-cov==5.0.0
+pytest-cov==7.1.0
 # Do testow zgodnosci specyfikacji OpenAPI z implementacja:
 PyYAML==6.0.2
