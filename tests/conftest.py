@@ -104,6 +104,24 @@ def wzorzec_bazy(tmp_path_factory):
     return sciezka
 
 
+def ustaw_limiter(wlaczony: bool):
+    """Wlacza lub wylacza ograniczanie zadan na czas testu.
+
+    Uzywamy atrybutu `limiter.enabled`, a NIE ustawienia RATELIMIT_ENABLED
+    w konfiguracji Flaska. Flask-Limiter 4.x usunal ten klucz — ustawienie go
+    przestalo cokolwiek robic i zaden blad sie nie pojawil. Skutek byl
+    podstepny: limity dzialaly w trakcie calego przebiegu testow, kolejne
+    logowania zuzywaly pule 5/min na konto, a testy uruchamiane pozniej
+    dostawaly 429 i wywracaly sie na brakujacych polach odpowiedzi.
+    Pojedynczo przechodzily, bo licznik byl wtedy pusty.
+    """
+    limiter.enabled = wlaczony
+    try:
+        limiter.reset()
+    except Exception:  # pragma: no cover — zalezy od backendu magazynu
+        pass
+
+
 @pytest.fixture
 def app(tmp_path, monkeypatch, wzorzec_bazy):
     """Aplikacja Flask ze swieza baza. Limiter wylaczony — wlacza go osobny test."""
@@ -112,7 +130,8 @@ def app(tmp_path, monkeypatch, wzorzec_bazy):
     monkeypatch.setattr(db_module, "DB_PATH", str(db_file))
 
     application = create_app()
-    application.config.update(TESTING=True, RATELIMIT_ENABLED=False)
+    application.config.update(TESTING=True)
+    ustaw_limiter(False)
     return application
 
 
@@ -152,14 +171,8 @@ def technik(client):
 @pytest.fixture
 def rate_limited_client(app):
     """Klient z WLACZONYM ograniczaniem zadan i wyzerowanym licznikiem."""
-    app.config["RATELIMIT_ENABLED"] = True
-    try:
-        limiter.reset()
-    except Exception:  # pragma: no cover — zalezy od backendu magazynu
-        pass
+    ustaw_limiter(True)
     yield app.test_client()
-    app.config["RATELIMIT_ENABLED"] = False
-    try:
-        limiter.reset()
-    except Exception:  # pragma: no cover
-        pass
+    # Wylaczenie i wyzerowanie po tescie — inaczej licznik zuzyty tutaj
+    # wplywalby na testy uruchamiane pozniej.
+    ustaw_limiter(False)
