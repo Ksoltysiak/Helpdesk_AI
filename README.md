@@ -14,7 +14,9 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 - [Szybki start (lokalnie, bez Dockera)](#szybki-start-lokalnie-bez-dockera)
 - [Testy](#testy)
 - [Weryfikacja działania](#weryfikacja-działania)
+- [Architektura](#architektura)
 - [Bezpieczeństwo](#bezpieczeństwo)
+- [Wydajność](#wydajność)
 - [Role użytkowników](#role-użytkowników)
 - [Punkty końcowe API](#punkty-końcowe-api)
 - [Cykl życia zgłoszenia](#cykl-życia-zgłoszenia-dozwolone-przejścia-statusów)
@@ -26,24 +28,25 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 
 ## Struktura plików
 
-| Plik                 | Odpowiada za                                              |
-|-----------------------|------------------------------------------------------------|
-| `app.py`              | Punkt startowy, nagłówki bezpieczeństwa, serwowanie frontendu i dokumentacji |
-| `openapi.yaml`        | Specyfikacja API (OpenAPI 3.0) — źródło prawdy dla dokumentacji |
-| `SECURITY.md`         | Audyt bezpieczeństwa — weryfikacja 20 zabezpieczeń |
-| `db.py`               | Schemat bazy danych, połączenie, zapis audytu              |
-| `auth.py`             | JWT, generowanie/weryfikacja tokenów, dekoratory RBAC      |
-| `rate_limit.py`       | Instancja Flask-Limiter (ograniczanie żądań)               |
-| `ai.py`               | Automatyczna kategoryzacja zgłoszeń                        |
-| `routes.py`           | Wszystkie punkty końcowe API                               |
-| `seed.py`             | Wypełnienie bazy danymi testowymi (hasła hashowane)        |
-| `demo.py`             | Skrypt sprawdzający E2E — weryfikuje całe API              |
-| `tests/`              | Testy jednostkowe i integracyjne (`pytest`)                |
-| `requirements-dev.txt`| Zależności potrzebne wyłącznie do testów                   |
-| `Dockerfile`          | Obraz kontenera, uruchomienie jako użytkownik bez uprawnień root |
-| `docker-compose.yml`  | Uruchomienie usługi z trwałym wolumenem i wymaganym SECRET_KEY |
-| `.env.example`        | Szablon zmiennych środowiskowych                           |
-| `frontend/`           | Interfejs użytkownika (HTML + CSS + JS)                    |
+| Ścieżka                | Odpowiada za                                              |
+|------------------------|------------------------------------------------------------|
+| `app/api/`             | Warstwa HTTP — trasy, walidacja żądań, obsługa błędów      |
+| `app/domain/`          | Reguły biznesowe — kategoryzacja AI, cykl życia zgłoszenia |
+| `app/data/`            | Dostęp do bazy — schemat, zapytania, migracje              |
+| `app/security/`        | Tokeny JWT i kontrola dostępu                              |
+| `app/config.py`        | Cała konfiguracja środowiskowa w jednym miejscu            |
+| `app/__init__.py`      | Fabryka aplikacji — nagłówki, kompresja, cache, HTTPS      |
+| `wsgi.py`              | Punkt wejścia dla gunicorna                                |
+| `deploy/nginx/`        | Konfiguracja odwrotnego proxy                              |
+| `openapi.yaml`         | Specyfikacja API — źródło prawdy dla dokumentacji          |
+| `ARCHITECTURE.md`      | Podział na warstwy, nginx, CI/CD                           |
+| `SECURITY.md`          | Audyt bezpieczeństwa — weryfikacja 20 zabezpieczeń         |
+| `PERFORMANCE.md`       | Pomiary wydajności i wprowadzone optymalizacje             |
+| `AI.md`                | Moduł kategoryzacji — działanie, skuteczność, ograniczenia |
+| `seed.py`              | Wypełnienie bazy danymi testowymi                          |
+| `demo.py`              | Testy E2E (adres przez `BASE_URL`)                         |
+| `tests/`               | Testy jednostkowe, integracyjne i architektoniczne         |
+| `frontend/`            | Interfejs użytkownika (HTML + CSS + JS)                    |
 
 ---
 
@@ -70,7 +73,8 @@ docker compose up --build
 docker compose exec helpdesk python seed.py
 ```
 
-Aplikacja będzie dostępna pod `http://localhost:5000`. Baza danych SQLite jest
+Aplikacja będzie dostępna pod **`http://localhost:8080`** (przez nginx).
+Sama aplikacja nie publikuje portu na host — ruch wchodzi wyłącznie przez proxy. Baza danych SQLite jest
 przechowywana w trwałym wolumenie `helpdesk-data` — dane przetrwają restart
 kontenera.
 
@@ -90,15 +94,15 @@ Wymagany **Python 3.8+**.
 cp .env.example .env          # ustaw SECRET_KEY
 py -m pip install -r requirements.txt
 py seed.py                    # tworzy i wypełnia bazę danymi testowymi
-py app.py                     # startuje serwer na http://127.0.0.1:5000
+py wsgi.py                    # startuje serwer na http://127.0.0.1:5000
 ```
 
 ---
 
 ## Testy
 
-Projekt ma zestaw **250 automatycznych sprawdzeń** w trzech warstwach
-(229 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
+Projekt ma zestaw **296 automatycznych sprawdzeń** w trzech warstwach
+(275 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
 
 ```bash
 py -m pip install -r requirements-dev.txt
@@ -107,8 +111,8 @@ py -m pytest
 
 | Warstwa | Liczba | Zakres |
 |---|---|---|
-| Jednostkowe | 36 | Kategoryzacja AI, tokeny JWT, maszyna stanów |
-| Integracyjne | 193 | Flask + baza: RBAC, walidacja typów, nagłówki, limity, HTTPS, zgodność dokumentacji |
+| Jednostkowe | 85 | Kategoryzacja AI i jej skuteczność, tokeny JWT, maszyna stanów |
+| Integracyjne | 252 | Flask + baza: RBAC, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
 | E2E (`demo.py`) | 21 | Pełny przepływ przez działający serwer |
 
 Testy uruchamiają się automatycznie przy każdym pull requeście
@@ -116,7 +120,8 @@ Testy uruchamiają się automatycznie przy każdym pull requeście
 
 Pełny opis — zakres każdej warstwy, raport pokrycia, weryfikacja mutacyjna
 i znane ograniczenia — znajduje się w pliku **[TESTING.md](TESTING.md)**.
-Wyniki audytu bezpieczeństwa: **[SECURITY.md](SECURITY.md)**.
+Wyniki audytu bezpieczeństwa: **[SECURITY.md](SECURITY.md)**,
+pomiary wydajności: **[PERFORMANCE.md](PERFORMANCE.md)**.
 
 ---
 
@@ -127,7 +132,7 @@ JWT, kategoryzację AI, przejścia statusów, ścieżkę audytu oraz testy negat
 (brak tokenu, podrobiony token, przekroczone limity długości, nieznany endpoint):
 
 ```bash
-py demo.py
+BASE_URL=http://localhost:8080 py demo.py
 ```
 
 Oczekiwany wynik:
@@ -140,15 +145,34 @@ Ręczne sprawdzenie endpointów (wymaga najpierw zalogowania się i pobrania tok
 
 ```bash
 # Zaloguj się i zapisz token
-TOKEN=$(curl -s -X POST http://localhost:5000/api/auth/login \
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"m.lewandowski","password":"tech123"}' \
   | python -c "import json,sys; print(json.load(sys.stdin)['token'])")
 
 # Użyj tokenu w nagłówku Authorization
-curl http://localhost:5000/api/dashboard \
+curl http://localhost:8080/api/dashboard \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+---
+
+## Architektura
+
+Projekt jest podzielony na warstwy o jednokierunkowych zależnościach:
+
+```
+api  ──>  domain,  data,  security      (warstwa HTTP)
+data ──>  tylko baza danych             (cały SQL)
+domain ──> nic z aplikacji              (reguły biznesowe)
+```
+
+Uruchomienie produkcyjne: **nginx** jako odwrotne proxy przed **gunicornem**.
+Aplikacja nie jest wystawiona bezpośrednio.
+
+Podział jest **egzekwowany testami** — `tests/test_architektura.py` sprawdza
+m.in., że w warstwie HTTP nie ma SQL-a, a warstwa domenowa nie importuje
+Flaska. Pełny opis: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 ---
 
@@ -189,6 +213,25 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ---
 
+## Wydajność
+
+Back-end został zmierzony na **20 000 zgłoszeń** i zoptymalizowany —
+szczegółowe wyniki w pliku **[PERFORMANCE.md](PERFORMANCE.md)**.
+
+| Mechanizm | Efekt |
+|---|---|
+| Stronicowanie listy (`page`, `per_page`) | Odpowiedź 9 MB → 23 KB |
+| Indeksy bazy danych | Filtrowanie 8,5× szybsze |
+| Tryb WAL + `busy_timeout` | Odczyt równolegle z zapisem, brak „database is locked" |
+| Pulpit jednym zapytaniem | 5 zapytań → 1 |
+| Kompresja gzip | −95% rozmiaru odpowiedzi |
+| Nagłówki cache | Pliki statyczne cache'owane, dane API — nigdy |
+
+> Czas logowania (~100 ms) **nie jest** optymalizowany celowo — to koszt
+> hashowania `scrypt`, które ma być wolne, by utrudnić zgadywanie haseł.
+
+---
+
 ## Role użytkowników
 
 | Rola        | Uprawnienia                                                           |
@@ -202,7 +245,7 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ## Punkty końcowe API
 
 **Pełna, interaktywna dokumentacja:** po uruchomieniu aplikacji dostępna pod
-adresem **`http://localhost:5000/api/docs`** (Swagger UI). Można z niej wysyłać
+adresem **`http://localhost:8080/api/docs`** (Swagger UI). Można z niej wysyłać
 prawdziwe żądania — wystarczy zalogować się przez `POST /auth/login`, skopiować
 token i wkleić go przyciskiem **Authorize**.
 
@@ -213,6 +256,7 @@ orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
 
 | Metoda | Ścieżka                   | Rola          | Opis                                      |
 |--------|----------------------------|---------------|---------------------------------------------|
+| GET    | `/api/health`              | —             | Kontrola zdrowia (dla load balancera)       |
 | POST   | `/api/auth/login`          | —             | Logowanie — zwraca JWT token                |
 | GET    | `/api/auth/me`             | każdy         | Dane zalogowanego użytkownika (odtworzenie sesji) |
 | GET    | `/api/dashboard`           | każdy         | Statystyki + rozkład kategorii              |
@@ -222,6 +266,7 @@ orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
 | PATCH  | `/api/tickets/{id}`        | technik/admin | Zmiana statusu / kategorii / przypisania    |
 | POST   | `/api/tickets/{id}/notes`  | technik/admin | Notatka (wewnętrzna lub widoczna)           |
 | GET    | `/api/tickets/{id}/audit`  | technik/admin | Pełna ścieżka audytu                        |
+| GET    | `/api/ai/skutecznosc`      | technik/admin | Skuteczność AI liczona z korekt techników   |
 | POST   | `/api/ai/categorize`       | każdy         | Test modułu AI na dowolnym tekście          |
 
 **Autoryzacja:** każde żądanie (poza logowaniem) wymaga nagłówka:
@@ -249,6 +294,10 @@ z kodem 400 i listą dozwolonych przejść.
 
 ## Kategoryzacja AI
 
+**Skuteczność:** 100% na zbiorze ewaluacyjnym (29 zgłoszeń), **94,4% na zbiorze
+kontrolnym** nieużywanym do strojenia. Pełny opis działania, pomiary
+i ograniczenia: **[AI.md](AI.md)**.
+
 Moduł `ai.py` przy każdym nowym zgłoszeniu automatycznie nadaje **kategorię**
 (Sprzęt, Oprogramowanie, Sieć, Poczta, Konta i dostęp, Bezpieczeństwo,
 Peryferia) oraz **priorytet** (Niski, Średni, Wysoki, Krytyczny). Priorytet
@@ -256,11 +305,17 @@ wyznacza termin SLA. Domyślnie moduł działa lokalnie (bez kluczy API i
 kosztów); w pliku `ai.py` opisano, jak podłączyć prawdziwy model językowy
 (np. OpenAI) bez zmian w reszcie back-endu.
 
-**Zasada triażu:** gdy zgłoszenie pasuje do kilku słów kluczowych naraz
-(np. „phishing" i „hasło"), wybierane jest dopasowanie o **najwyższym
-priorytecie**. Dzięki temu incydent bezpieczeństwa nie zostanie
-zaklasyfikowany jako rutynowa prośba o reset hasła i nie dostanie
-łagodniejszego terminu SLA (1h zamiast 8h).
+Moduł zwraca też **pewność** swojej decyzji i listę słów, które o niej
+zadecydowały. Gdy nic nie pasuje, zamiast zgadywać oznacza zgłoszenie jako
+wymagające weryfikacji — w interfejsie widoczne jako znacznik **„AI ?"**.
+
+**Zasada triażu:** gdy zgłoszenie pasuje do kilku słów kluczowych naraz,
+decyduje suma dowodów, a zgłoszenia bezpieczeństwa zawsze dostają priorytet
+krytyczny (SLA 1h). Priorytet jest podnoszony, gdy w treści widać skalę awarii
+(„cały dział") lub pilność („nie włącza się", „pilne").
+
+**Pomiar na żywo:** `GET /api/ai/skutecznosc` liczy jakość modułu z ręcznych
+korekt techników i wskazuje, które kategorie mylą się najczęściej.
 
 ---
 

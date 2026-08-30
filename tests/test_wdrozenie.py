@@ -12,7 +12,8 @@ import sys
 
 import pytest
 
-import db as db_module
+from app import config as db_module
+from app.data import database
 
 pytestmark = pytest.mark.integration
 
@@ -26,18 +27,34 @@ def app_z_ustawieniami(tmp_path, monkeypatch):
         for klucz, wartosc in srodowisko.items():
             monkeypatch.setenv(klucz, wartosc)
 
-        db_file = tmp_path / f"cfg_{abs(hash(frozenset(srodowisko.items())))}.db"
-        monkeypatch.setattr(db_module, "DB_PATH", str(db_file))
-        db_module.init_db()
-
+        # Przelaczniki srodowiskowe czytane sa przy imporcie app.config,
+        # wiec to jego trzeba przeladowac, a nie sama fabryke aplikacji.
         import importlib
+        from app import config as config_module
+        importlib.reload(config_module)
+
+        db_file = tmp_path / f"cfg_{abs(hash(frozenset(srodowisko.items())))}.db"
+        monkeypatch.setattr(config_module, "DB_PATH", str(db_file))
+        database.init_db()
+
         import app as app_module
         importlib.reload(app_module)
 
         aplikacja = app_module.create_app()
         aplikacja.config.update(TESTING=True, RATELIMIT_ENABLED=False)
         return aplikacja
-    return zbuduj
+
+    yield zbuduj
+
+    # Przywrocenie konfiguracji dla pozostalych testow — inaczej wlaczone tu
+    # FORCE_HTTPS czy TRUST_PROXY wyciekloby do reszty przebiegu.
+    import importlib
+    from app import config as config_module
+    for klucz in ("FORCE_HTTPS", "TRUST_PROXY"):
+        monkeypatch.delenv(klucz, raising=False)
+    importlib.reload(config_module)
+    import app as app_module
+    importlib.reload(app_module)
 
 
 # ---------------------------------------------------------------
@@ -133,7 +150,7 @@ def _uruchom_z_kluczem(klucz):
     if klucz is not None:
         srodowisko["SECRET_KEY"] = klucz
     return subprocess.run(
-        [sys.executable, "-W", "always", "-c", "import auth"],
+        [sys.executable, "-W", "always", "-c", "from app import config"],
         capture_output=True, text=True, cwd=ROOT, env=srodowisko,
     )
 

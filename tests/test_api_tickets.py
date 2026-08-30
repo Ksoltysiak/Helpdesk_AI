@@ -244,7 +244,85 @@ def test_endpoint_ai_zwraca_kategorie_i_priorytet(client, pracownik):
     resp = client.post("/api/ai/categorize", headers=pracownik,
                        json={"title": "Nie dziala VPN", "description": "Blad TLS"})
     assert resp.status_code == 200
-    assert resp.get_json() == {"kategoria": "Siec", "priorytet": "Wysoki"}
+    wynik = resp.get_json()
+    assert wynik["kategoria"] == "Siec"
+    assert wynik["priorytet"] == "Wysoki"
+
+
+def test_endpoint_ai_zwraca_pewnosc_i_uzasadnienie(client, pracownik):
+    """Technik ma widziec nie tylko decyzje, ale i jej podstawe."""
+    wynik = client.post("/api/ai/categorize", headers=pracownik,
+                        json={"title": "Nie dziala VPN", "description": "Blad TLS"}).get_json()
+    assert 0.0 <= wynik["pewnosc"] <= 1.0
+    assert wynik["wymaga_weryfikacji"] is False
+    assert "vpn" in wynik["dopasowania"]
+
+
+def test_nowe_zgloszenie_zapamietuje_pewnosc_ai(client, pracownik):
+    """Pewnosc musi przetrwac w bazie — inaczej technik jej pozniej nie zobaczy."""
+    tid = client.post("/api/tickets", headers=pracownik,
+                      json={"title": "Nie dziala VPN", "description": "Blad TLS"}).get_json()["id"]
+    dane = client.get(f"/api/tickets/{tid}", headers=pracownik).get_json()
+    assert dane["ai_pewnosc"] is not None
+    assert 0.0 <= dane["ai_pewnosc"] <= 1.0
+
+
+def test_zgloszenie_nierozpoznane_ma_zerowa_pewnosc(client, pracownik):
+    tid = client.post("/api/tickets", headers=pracownik,
+                      json={"title": "Prosba o spotkanie",
+                            "description": "Chcialbym umowic rozmowe"}).get_json()["id"]
+    dane = client.get(f"/api/tickets/{tid}", headers=pracownik).get_json()
+    assert dane["ai_pewnosc"] == 0.0
+
+
+# ---------------------------------------------------------------
+# Skutecznosc AI liczona z korekt technikow
+# ---------------------------------------------------------------
+
+def test_skutecznosc_ai_wymaga_roli_technika(client, pracownik):
+    assert client.get("/api/ai/skutecznosc", headers=pracownik).status_code == 403
+
+
+def test_skutecznosc_ai_zwraca_komplet_miar(client, technik):
+    dane = client.get("/api/ai/skutecznosc", headers=technik).get_json()
+    assert set(dane) == {"zgloszen_z_ai", "poprawionych_recznie", "skutecznosc",
+                         "srednia_pewnosc", "wymaga_weryfikacji", "prog_pewnosci",
+                         "najczestsze_pomylki"}
+
+
+def test_reczna_korekta_obniza_skutecznosc(client, technik, pracownik):
+    """Zmiana kategorii przez technika to sygnal pomylki modulu."""
+    client.post("/api/tickets", headers=pracownik,
+                json={"title": "Nie dziala VPN", "description": "Blad TLS"})
+
+    przed = client.get("/api/ai/skutecznosc", headers=technik).get_json()
+    client.patch("/api/tickets/1", headers=technik, json={"category": "Sprzet"})
+    po = client.get("/api/ai/skutecznosc", headers=technik).get_json()
+
+    assert po["poprawionych_recznie"] > przed["poprawionych_recznie"]
+    assert po["skutecznosc"] < przed["skutecznosc"]
+
+
+def test_skutecznosc_pokazuje_kierunek_pomylek(client, technik):
+    """Zestawienie ma wprost wskazywac, ktore kategorie myla sie najczesciej."""
+    client.patch("/api/tickets/1", headers=technik, json={"category": "Sprzet"})
+    dane = client.get("/api/ai/skutecznosc", headers=technik).get_json()
+    pomylki = dane["najczestsze_pomylki"]
+    assert any(p["z"] == "Bezpieczenstwo" and p["na"] == "Sprzet" for p in pomylki)
+
+
+def test_skutecznosc_bez_zgloszen_nie_dzieli_przez_zero(client, technik, app):
+    import sqlite3
+    from app import config as db_module
+    conn = sqlite3.connect(db_module.DB_PATH)
+    conn.execute("DELETE FROM audit_log")
+    conn.execute("DELETE FROM notes")
+    conn.execute("DELETE FROM tickets")
+    conn.commit(); conn.close()
+
+    dane = client.get("/api/ai/skutecznosc", headers=technik).get_json()
+    assert dane["skutecznosc"] is None
+    assert dane["zgloszen_z_ai"] == 0
 
 
 def test_endpoint_ai_dziala_z_samym_tytulem(client, pracownik):

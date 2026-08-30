@@ -59,6 +59,37 @@ security:
 paths:
 
   # ---------------------------------------------------------------
+  /health:
+    get:
+      tags: [Pulpit i AI]
+      summary: Kontrola zdrowia usługi
+      description: |
+        Przeznaczone dla load balancera i monitoringu — **nie wymaga tokenu**,
+        ponieważ sonda infrastruktury go nie posiada. Nie jest objęte limitem
+        żądań.
+
+        Odpowiedź nie zawiera żadnych szczegółów o systemie: potwierdza jedynie,
+        że proces odpowiada i ma działające połączenie z bazą danych.
+      security: []
+      responses:
+        "200":
+          description: Usługa działa poprawnie
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok], example: ok }
+        "503":
+          description: Brak połączenia z bazą danych
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [error], example: error }
+
+  # ---------------------------------------------------------------
   /auth/login:
     post:
       tags: [Uwierzytelnianie]
@@ -144,7 +175,14 @@ paths:
     get:
       tags: [Pulpit i AI]
       summary: Statystyki i rozkład kategorii
-      description: Dane zbiorcze dla całego systemu (nie są filtrowane wg roli).
+      description: |
+        **Zakres zależy od roli**, tak samo jak lista zgłoszeń:
+
+        - **pracownik** — statystyki wyłącznie jego własnych zgłoszeń,
+        - **technik / admin** — dane zbiorcze całego systemu.
+
+        Dzięki temu pulpit pokazuje to samo, co widoczna dla użytkownika lista,
+        a pracownik nie poznaje liczby zgłoszeń w całej organizacji.
       responses:
         "200":
           description: Statystyki
@@ -156,14 +194,19 @@ paths:
                 properties:
                   statystyki:
                     type: object
-                    required: [otwarte, w_trakcie, rozwiazane, krytyczne]
+                    required: [wszystkie, otwarte, w_trakcie, rozwiazane, zamkniete, krytyczne]
                     properties:
+                      wszystkie:
+                        type: integer
+                        description: Łączna liczba zgłoszeń w zakresie roli
+                        example: 18
                       otwarte:
                         type: integer
                         description: Wszystkie zgłoszenia poza zamkniętymi
                         example: 15
                       w_trakcie: { type: integer, example: 5 }
                       rozwiazane: { type: integer, example: 2 }
+                      zamkniete: { type: integer, example: 3 }
                       krytyczne:
                         type: integer
                         description: Priorytet krytyczny, jeszcze niezamknięte
@@ -192,6 +235,13 @@ paths:
           parametry filtrowania są dla niego ignorowane i **nie pozwalają**
           dosięgnąć cudzych zgłoszeń,
         - **technik / admin** — wszystkie zgłoszenia, z opcjonalnym filtrowaniem.
+
+        **Wyniki są stronicowane.** Domyślnie zwracane jest 50 zgłoszeń na
+        stronę, maksymalnie 200. Pole `total` oznacza liczbę **wszystkich**
+        pasujących zgłoszeń, a nie liczbę zwróconych w tej odpowiedzi.
+
+        Wartości spoza zakresu są przycinane do dozwolonych granic zamiast
+        powodować błąd (np. `per_page=9999` zadziała jak `per_page=200`).
       parameters:
         - name: status
           in: query
@@ -205,19 +255,39 @@ paths:
           in: query
           description: Tylko technik/admin
           schema: { $ref: "#/components/schemas/Kategoria" }
+        - name: page
+          in: query
+          description: Numer strony, liczony od 1
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          description: Liczba zgłoszeń na stronę
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
       responses:
         "200":
-          description: Lista zgłoszeń
+          description: Stronicowana lista zgłoszeń
           content:
             application/json:
               schema:
                 type: object
-                required: [total, tickets]
+                required: [total, page, per_page, pages, tickets]
                 properties:
                   total:
                     type: integer
-                    description: Liczba zwróconych zgłoszeń
-                    example: 19
+                    description: Liczba wszystkich pasujących zgłoszeń
+                    example: 1284
+                  page:
+                    type: integer
+                    description: Numer zwróconej strony
+                    example: 1
+                  per_page:
+                    type: integer
+                    description: Liczba zgłoszeń na stronę
+                    example: 50
+                  pages:
+                    type: integer
+                    description: Łączna liczba stron (minimum 1)
+                    example: 26
                   tickets:
                     type: array
                     items: { $ref: "#/components/schemas/Zgloszenie" }
@@ -464,6 +534,79 @@ paths:
           $ref: "#/components/responses/BrakUprawnien"
 
   # ---------------------------------------------------------------
+  /ai/skutecznosc:
+    get:
+      tags: [Pulpit i AI]
+      summary: Skuteczność kategoryzacji AI
+      description: |
+        Miara jakości modułu liczona z **rzeczywistej pracy techników**, a nie
+        deklarowana. Każda ręczna zmiana kategorii to sygnał, że moduł pomylił
+        się na konkretnym zgłoszeniu — skuteczność to odsetek zgłoszeń,
+        których nie trzeba było poprawiać.
+
+        Zestawienie pokazuje też najczęstsze pomyłki (z jakiej kategorii na
+        jaką poprawiano), co wprost wskazuje, które słowa kluczowe wymagają
+        uzupełnienia.
+
+        Wymaga roli `technik` lub `admin`.
+      responses:
+        "200":
+          description: Zestawienie skuteczności
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - zgloszen_z_ai
+                  - poprawionych_recznie
+                  - skutecznosc
+                  - srednia_pewnosc
+                  - wymaga_weryfikacji
+                  - prog_pewnosci
+                  - najczestsze_pomylki
+                properties:
+                  zgloszen_z_ai:
+                    type: integer
+                    description: Liczba zgłoszeń skategoryzowanych automatycznie
+                    example: 318
+                  poprawionych_recznie:
+                    type: integer
+                    description: Ile z nich technik przekwalifikował
+                    example: 24
+                  skutecznosc:
+                    type: number
+                    format: float
+                    nullable: true
+                    description: "1 − (poprawione / wszystkie); `null`, gdy brak danych"
+                    example: 0.925
+                  srednia_pewnosc:
+                    type: number
+                    format: float
+                    nullable: true
+                    example: 0.68
+                  wymaga_weryfikacji:
+                    type: integer
+                    description: Zgłoszenia o pewności poniżej progu
+                    example: 12
+                  prog_pewnosci:
+                    type: number
+                    format: float
+                    example: 0.4
+                  najczestsze_pomylki:
+                    type: array
+                    description: Kierunki najczęstszych ręcznych korekt
+                    items:
+                      type: object
+                      properties:
+                        z:      { type: string, example: Oprogramowanie }
+                        na:     { type: string, example: Konta i dostep }
+                        liczba: { type: integer, example: 7 }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+
+  # ---------------------------------------------------------------
   /ai/categorize:
     post:
       tags: [Pulpit i AI]
@@ -546,10 +689,34 @@ components:
 
     WynikAI:
       type: object
-      required: [kategoria, priorytet]
+      required: [kategoria, priorytet, pewnosc, wymaga_weryfikacji, dopasowania]
       properties:
         kategoria: { $ref: "#/components/schemas/Kategoria" }
         priorytet: { $ref: "#/components/schemas/Priorytet" }
+        pewnosc:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: |
+            Siła przesłanek stojących za decyzją. Zależy od tego, jak bardzo
+            zwycięska kategoria dominuje nad pozostałymi oraz ile niezależnych
+            słów ją wskazuje. Wartość `0.0` oznacza brak jakichkolwiek
+            przesłanek — moduł nie rozpoznał zgłoszenia.
+          example: 0.75
+        wymaga_weryfikacji:
+          type: boolean
+          description: |
+            `true`, gdy pewność jest poniżej progu (0.4). Zgłoszenie powinno
+            zostać sprawdzone przez technika — moduł nie zgaduje po cichu.
+          example: false
+        dopasowania:
+          type: array
+          description: |
+            Słowa kluczowe, które zadecydowały o kategorii — uzasadnienie
+            decyzji dla technika.
+          items: { type: string }
+          example: ["vpn", "polaczen"]
 
     Zgloszenie:
       type: object
@@ -563,6 +730,7 @@ components:
         - created_by
         - assigned_to
         - ai_categorized
+        - ai_pewnosc
         - sla_deadline
         - created_at
         - updated_at
@@ -603,6 +771,17 @@ components:
           type: boolean
           description: Czy kategorię nadał moduł AI
           example: true
+        ai_pewnosc:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: |
+            Pewność modułu AI zapisana w chwili tworzenia zgłoszenia.
+            Pozwala technikowi odróżnić decyzje pewne od zgadywanych.
+            `null` dla zgłoszeń sprzed wprowadzenia tego pola.
+          example: 0.75
         sla_deadline:
           type: string
           format: date-time

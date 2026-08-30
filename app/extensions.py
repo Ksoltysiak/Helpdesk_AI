@@ -1,21 +1,15 @@
-import os
+"""Rozszerzenia Flaska tworzone raz i podpinane w fabryce aplikacji."""
 
 from flask import request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-# Domyslnie licznik trzymany jest w pamieci procesu. Przy uruchomieniu
-# wieloprocesowym (gunicorn --workers N) kazdy proces ma wtedy wlasny licznik,
-# wiec faktyczny limit jest N razy wyzszy niz zadeklarowany.
-#
-# Ustawienie RATELIMIT_STORAGE_URI (np. redis://host:6379) powoduje, ze
-# wszystkie procesy dziela jeden licznik i limit dziala zgodnie z deklaracja.
-STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
+from app import config
 
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[],
-    storage_uri=STORAGE_URI,
+    storage_uri=config.RATELIMIT_STORAGE_URI,
 )
 
 
