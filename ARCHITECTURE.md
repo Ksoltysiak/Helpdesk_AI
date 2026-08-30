@@ -135,21 +135,34 @@ i przy każdym pull requeście:
 | **Pełny stos** | `docker compose up` z nginx; sprawdza zdrowie przez proxy, brak uprawnień root, dostępność dokumentacji i frontendu |
 | **Publikacja obrazu (CD)** | Tylko z `main`, tylko gdy wszystko powyżej przeszło i tylko po włączeniu (opis niżej) — obraz trafia do GHCR ze znacznikiem `latest` oraz SHA commita |
 
-### Włączenie publikacji obrazu
+### Publikacja obrazu — domyślnie wyłączona i dlaczego
 
-Krok CD jest domyślnie **wyłączony**, ponieważ zapis do rejestru wymaga
-uprawnień, których nie da się nadać z poziomu kodu. Bez nich zadanie kończy się
-błędem i psuje wynik całego przebiegu, mimo że aplikacja jest sprawna.
+Krok CD uruchamia się tylko wtedy, gdy w repozytorium istnieje zmienna
+`PUBLIKUJ_OBRAZ` o wartości `true`. **Domyślnie jej nie ma** i tak ma zostać
+do czasu wyboru docelowego hostingu — dopóki nic nie pobiera obrazu,
+publikowanie go niczemu nie służy.
 
-Aby go włączyć:
+Zapis do rejestru GHCR wymaga podniesienia uprawnień domyślnego tokenu
+(*Settings → Actions → General → Workflow permissions → Read and write*).
+Warto wiedzieć, co to naprawdę oznacza, zanim się je włączy:
 
-1. **Settings → Actions → General → Workflow permissions** → zaznacz
-   *Read and write permissions*.
-2. **Settings → Secrets and variables → Actions → Variables** → dodaj zmienną
-   `PUBLIKUJ_OBRAZ` o wartości `true`.
+| Skutek | Znaczenie |
+|---|---|
+| Ustawienie działa **na całe repozytorium** | Podnosi pułap uprawnień dla *każdego* przebiegu, także zadań testowych, które zapisu nie potrzebują |
+| Obejmuje przebiegi z pull requestów | Dla PR-ów z gałęzi **w tym samym repozytorium** token dziedziczy to ustawienie (PR-y z forków zawsze dostają token tylko do odczytu) |
+| Workflow bierze się z gałęzi PR-a | Współpracownik może w PR zmienić `.github/workflows/` i uruchomić własny kod z tokenem mającym prawo zapisu — do repozytorium, pakietów i wydań |
 
-Do czasu wyboru docelowego hostingu publikowanie obrazu nie jest potrzebne —
-warto włączyć je razem z wdrożeniem.
+Przy zespole pracującym na gałęziach w tym samym repozytorium jest to realna
+ścieżka podniesienia uprawnień — ta sama klasa ryzyka, przed którą chroni
+ochrona gałęzi.
+
+**Zalecenie:** zostawić uprawnienia domyślne (tylko odczyt) i nie tworzyć
+zmiennej, dopóki nie ma dokąd wdrażać.
+
+Gdy przyjdzie czas na wdrożenie, bezpieczniejszy wariant niż podnoszenie
+uprawnień całego repozytorium to token PAT o wąskim zakresie (`packages:write`)
+trzymany jako sekret i używany wyłącznie przez zadanie publikujące — najlepiej
+w **Environment** z wymaganą akceptacją, żeby pull request nie mógł go użyć.
 
 Stos testowany jest przez `docker compose`, a nie jako sam kontener aplikacji:
 błąd w konfiguracji nginx albo w połączeniu między usługami nie ujawniłby się
