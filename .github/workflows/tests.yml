@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
@@ -72,7 +72,7 @@ jobs:
       SECRET_KEY: klucz-tylko-do-testow-ci-o-dlugosci-32-bajtow
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Sprawdzamy caly stos z docker compose, a nie sam obraz aplikacji:
       # blad w konfiguracji nginx albo w polaczeniu miedzy uslugami nie
