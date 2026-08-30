@@ -1,10 +1,24 @@
 """Wystawianie i weryfikacja tokenów JWT."""
 
 import time
+from datetime import timedelta
 
 import jwt
 
 from app import config
+
+# Tolerancja na rozjazd zegarow miedzy wystawieniem a weryfikacja tokenu.
+#
+# Token niesie czas wystawienia (`iat`) i wygasniecia (`exp`). Gdy zegar
+# weryfikujacego jest choc o sekunde do tylu wzgledem wystawiajacego, PyJWT
+# odrzuca token jako "jeszcze niewazny" — a uzytkownik dostaje 401 mimo
+# poprawnego logowania. Przy kilku procesach czy maszynach drobny rozjazd
+# jest normalny.
+#
+# Kilka sekund luzu to standardowa praktyka i nie oslabia zabezpieczenia
+# w istotny sposob: token wygasly nadal zostaje odrzucony, tylko o te kilka
+# sekund pozniej.
+LUZ_ZEGARA = timedelta(seconds=10)
 
 
 def generate_token(user_id: int) -> str:
@@ -32,7 +46,8 @@ def id_uzytkownika_z_tokenu(token: str):
     if not token:
         return None
     try:
-        payload = jwt.decode(token, config.SECRET_KEY, algorithms=["HS256"])
+        payload = jwt.decode(token, config.SECRET_KEY, algorithms=["HS256"],
+                             leeway=LUZ_ZEGARA)
     except jwt.InvalidTokenError:      # obejmuje ExpiredSignatureError
         return None
 

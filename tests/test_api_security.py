@@ -148,6 +148,45 @@ def test_limit_na_konto_nie_blokuje_innych_uzytkownikow(rate_limited_client):
     assert inny.status_code == 200, "Limit dla jednego konta odcial inne konto"
 
 
+@pytest.mark.parametrize("login", [None, 123, {"a": 1}, ["x"]])
+def test_klucz_limitu_znosi_nietekstowy_login(app, login):
+    """Klient moze przyslac dowolny JSON — budowanie klucza limitu nie moze
+    sie na tym wywrocic, bo blad wystapilby PRZED walidacja danych."""
+    from app.extensions import klucz_logowania
+
+    with app.test_request_context("/api/auth/login", json={"username": login}):
+        klucz = klucz_logowania()
+    assert isinstance(klucz, str) and klucz.endswith("|")
+
+
+def test_limit_jest_faktycznie_wylaczony_w_zwyklych_testach(client):
+    """REGRESJA: mechanizm wylaczania limitu przestal dzialac po cichu.
+
+    Flask-Limiter 4.x usunal ustawienie RATELIMIT_ENABLED. Fixture nadal je
+    ustawial, nic nie zglaszalo bledu, a limity dzialaly przez caly przebieg
+    testow — kolejne logowania zuzywaly pule 5/min na konto i testy z konca
+    przebiegu dostawaly 429. Pojedynczo przechodzily, wiec objaw wygladal
+    na losowy.
+
+    Ten test sprawdza sam mechanizm, zeby kolejna zmiana nazwy nie przeszla
+    niezauwazona.
+    """
+    from app.extensions import limiter
+    assert limiter.enabled is False, (
+        "Ograniczanie zadan jest aktywne w zwyklych testach — przebieg stanie "
+        "sie zalezny od kolejnosci i zacznie sie sypac na 429"
+    )
+
+
+def test_wielokrotne_logowanie_nie_wyczerpuje_limitu_w_testach(client):
+    """Skutek praktyczny: fixture logujace sie wielokrotnie nie moga
+    doprowadzic do 429 w trakcie zwyklego przebiegu."""
+    for _ in range(12):
+        resp = client.post("/api/auth/login",
+                           json={"username": "k.nowak", "password": "haslo123"})
+        assert resp.status_code == 200, f"Otrzymano {resp.status_code} zamiast 200"
+
+
 def test_limit_nie_dotyczy_zwyklych_odczytow(rate_limited_client, technik):
     kody = [
         rate_limited_client.get("/api/tickets", headers=technik).status_code
