@@ -5,6 +5,12 @@ Back-end + front-end systemu HelpDesk dla MŚP: REST API w technologii
 życia zgłoszenia IT, kontrolę dostępu opartą na rolach (RBAC), automatyczną
 kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 
+> **Dokumentacja projektu:** całościowe opracowanie — założenia, architektura,
+> opis mechanizmu kategoryzacji wraz z kluczowymi listingami kodu, wyniki
+> pomiarów i ograniczenia — znajduje się w pliku
+> **[DOKUMENTACJA.md](DOKUMENTACJA.md)**. Niniejszy plik jest instrukcją
+> uruchomieniową i skrótem informacji technicznych.
+
 ---
 
 ## Spis treści
@@ -39,6 +45,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 | `wsgi.py`              | Punkt wejścia dla gunicorna                                |
 | `deploy/nginx/`        | Konfiguracja odwrotnego proxy                              |
 | `openapi.yaml`         | Specyfikacja API — źródło prawdy dla dokumentacji          |
+| `DOKUMENTACJA.md`      | **Opracowanie całościowe projektu** (dokumentacja pracy)   |
 | `ARCHITECTURE.md`      | Podział na warstwy, nginx, CI/CD                           |
 | `SECURITY.md`          | Audyt bezpieczeństwa — weryfikacja 20 zabezpieczeń         |
 | `PERFORMANCE.md`       | Pomiary wydajności i wprowadzone optymalizacje             |
