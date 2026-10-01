@@ -36,5 +36,24 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Cykliczne kopie zapasowe bazy (opis: BACKUP.md).
+  backup:
+    build: ./deploy/backup
+    volumes:
+      - helpdesk-data:/data
+      # Domyślnie wolumen Dockera; BACKUP_HOST_DIR=/sciezka zapisuje kopie
+      # w katalogu hosta, skąd łatwo przenieść je poza serwer.
+      - ${BACKUP_HOST_DIR:-helpdesk-backups}:/backups
+    environment:
+      - DB_PATH=/data/helpdesk.db
+      - BACKUP_SCHEDULE=${BACKUP_SCHEDULE:-0 2 * * *}
+      - BACKUP_KEEP=${BACKUP_KEEP:-14}
+      - TZ=${TZ:-Europe/Warsaw}
+    depends_on:
+      helpdesk:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   helpdesk-data:
+  helpdesk-backups:
