@@ -105,6 +105,11 @@ jobs:
       - name: Frontend jest serwowany przez nginx
         run: curl -sf http://127.0.0.1:8080/ | grep -q "HelpDesk"
 
+      # Kopia, ktorej nikt nie probowal odtworzyc, nie jest kopia zapasowa.
+      # Test przechodzi pelny cykl: kopia, utrata bazy, odtworzenie, zapis.
+      - name: Kopie zapasowe i odtwarzanie po awarii
+        run: bash deploy/backup/test-backup.sh
+
       - name: Logi przy niepowodzeniu
         if: failure()
         run: docker compose logs --tail 60
