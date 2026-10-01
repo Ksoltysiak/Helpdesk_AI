@@ -98,7 +98,7 @@ Gunicorn sam obsługuje HTTP, więc warto wiedzieć, co dokłada proxy:
 | Funkcja | Znaczenie |
 |---|---|
 | **Buforowanie wolnych klientów** | Bez tego klient wysyłający żądanie bajt po bajcie zajmuje workera gunicorna na cały czas transmisji. Przy 2 workerach wystarczy dwóch takich klientów, by zablokować usługę. |
-| **Miejsce na TLS** | Certyfikat kończy się na nginx; aplikacja nie musi nic o nim wiedzieć. |
+| **Terminacja TLS** | Certyfikat kończy się na nginx (`nginx-https.conf`, nakładka `docker-compose.https.yml`); aplikacja dostaje `X-Forwarded-Proto` i sama nie obsługuje TLS. |
 | **Limit rozmiaru żądania** | `client_max_body_size 1m` odcina duże ładunki, zanim dotrą do aplikacji. |
 | **Limity czasu** | Zerwane połączenia nie trzymają zasobów w nieskończoność. |
 | **Jeden punkt wejścia** | Gdy dojdą kolejne usługi, adresacja się nie zmienia. |
@@ -190,5 +190,8 @@ poprzedniej, gdy coś pójdzie nie tak.
 - **Brak warstwy serwisów.** Logika tworzenia zgłoszenia jest nadal w trasie
   `api/tickets.py`. Przy tej wielkości osobna warstwa serwisów byłaby
   ceremonią bez treści — warto ją dodać, gdy reguły się rozrosną.
-- **Nginx nie terminuje TLS** w obecnej konfiguracji — to miejsce jest
-  przygotowane, ale certyfikat trzeba dołożyć przy wdrożeniu.
+- **TLS jest opcjonalny i lokalnie samopodpisany.** Domyślny stos (i CI)
+  działa po HTTP; HTTPS włącza nakładka `docker-compose.https.yml`
+  z certyfikatem z `deploy/generate_ssl.py`. Przy prawdziwym wdrożeniu
+  certyfikat powinien pochodzić z zaufanego urzędu (np. Let's Encrypt),
+  a przekierowanie w `nginx-https.conf` wskazywać port 443 zamiast 8443.

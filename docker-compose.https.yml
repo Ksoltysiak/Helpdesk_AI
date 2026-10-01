@@ -1,0 +1,26 @@
+# Nakładka włączająca HTTPS na nginx. Używana razem z plikiem głównym:
+#
+#   py deploy/generate_ssl.py
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+#
+# (albo po prostu: make up-https)
+
+services:
+  helpdesk:
+    environment:
+      # Przekierowanie HTTP -> HTTPS i nagłówek HSTS po stronie aplikacji.
+      - FORCE_HTTPS=1
+    healthcheck:
+      # Sonda odpytuje aplikację bezpośrednio, z pominięciem nginx, więc bez
+      # tego nagłówka FORCE_HTTPS odpowiedziałby przekierowaniem 308
+      # i kontener nigdy nie zostałby uznany za zdrowy.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; r=urllib.request.Request('http://127.0.0.1:5000/api/health', headers={'X-Forwarded-Proto': 'https'}); sys.exit(0) if urllib.request.urlopen(r, timeout=3).status==200 else sys.exit(1)"]
+
+  nginx:
+    ports:
+      - "8443:443"
+    volumes:
+      # Ta sama ścieżka docelowa co w pliku głównym — compose podmienia wpis.
+      - ./deploy/nginx/nginx-https.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/nginx/ssl:/etc/nginx/ssl:ro

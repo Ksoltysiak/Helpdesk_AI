@@ -1,0 +1,10 @@
+# Skrypty powłoki uruchamiane w kontenerze Linux muszą mieć końce linii LF.
+#
+# Na Windowsie git (core.autocrlf=true) zamienia LF na CRLF przy checkoucie,
+# a Dockerfile kopiuje katalog roboczy (COPY . .). Z CRLF w obrazie
+# "#!/bin/sh\r" nie istnieje i kontener nie startuje:
+#   exec ./docker-entrypoint.sh: no such file or directory
+*.sh text eol=lf
+
+# Konfiguracja nginx trafia do kontenera przez wolumen — jak wyżej.
+*.conf text eol=lf

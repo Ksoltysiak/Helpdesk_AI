@@ -1,0 +1,18 @@
+# Dockerfile kopiuje cały katalog (COPY . .), więc bez tej listy do obrazu
+# trafiłyby sekrety i lokalne artefakty.
+
+# Sekrety — klucz prywatny TLS należy do nginx, nie do obrazu aplikacji.
+.env
+deploy/nginx/ssl/
+*.pem
+
+# Lokalne bazy i artefakty
+*.db
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Historia repozytorium nie jest potrzebna w obrazie
+.git/

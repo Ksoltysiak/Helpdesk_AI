@@ -10,6 +10,11 @@ helpdesk.db
 # z repozytorium cala warstwe app/data/. Git nie zglasza takiego pominiecia.
 /data/
 
+# Certyfikat i klucz prywatny TLS — generowane lokalnie (deploy/generate_ssl.py),
+# nigdy nie trafiaja do repozytorium.
+deploy/nginx/ssl/
+*.pem
+
 # Artefakty testow
 .pytest_cache/
 .coverage
