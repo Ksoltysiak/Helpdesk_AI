@@ -5,6 +5,12 @@ Back-end + front-end systemu HelpDesk dla MŚP: REST API w technologii
 życia zgłoszenia IT, kontrolę dostępu opartą na rolach (RBAC), automatyczną
 kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 
+> **Dokumentacja projektu:** całościowe opracowanie — założenia, architektura,
+> opis mechanizmu kategoryzacji wraz z kluczowymi listingami kodu, wyniki
+> pomiarów i ograniczenia — znajduje się w pliku
+> **[DOKUMENTACJA.md](DOKUMENTACJA.md)**. Niniejszy plik jest instrukcją
+> uruchomieniową i skrótem informacji technicznych.
+
 ---
 
 ## Spis treści
@@ -37,8 +43,12 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 | `app/config.py`        | Cała konfiguracja środowiskowa w jednym miejscu            |
 | `app/__init__.py`      | Fabryka aplikacji — nagłówki, kompresja, cache, HTTPS      |
 | `wsgi.py`              | Punkt wejścia dla gunicorna                                |
-| `deploy/nginx/`        | Konfiguracja odwrotnego proxy                              |
+| `deploy/nginx/`        | Konfiguracja odwrotnego proxy (HTTP oraz wariant z TLS)    |
+| `deploy/generate_ssl.py` | Samopodpisany certyfikat TLS do uruchomień lokalnych     |
+| `docker-compose.https.yml` | Nakładka włączająca HTTPS na nginx                     |
+| `Makefile`             | Skróty najczęstszych poleceń (`make help`)                 |
 | `openapi.yaml`         | Specyfikacja API — źródło prawdy dla dokumentacji          |
+| `DOKUMENTACJA.md`      | **Opracowanie całościowe projektu** (dokumentacja pracy)   |
 | `ARCHITECTURE.md`      | Podział na warstwy, nginx, CI/CD                           |
 | `SECURITY.md`          | Audyt bezpieczeństwa — weryfikacja 20 zabezpieczeń         |
 | `PERFORMANCE.md`       | Pomiary wydajności i wprowadzone optymalizacje             |
@@ -83,6 +93,42 @@ Zatrzymanie:
 ```bash
 docker compose down
 ```
+
+### Wariant z HTTPS
+
+Nginx może kończyć połączenia TLS. Na potrzeby uruchomień lokalnych wystarczy
+certyfikat samopodpisany (przeglądarka pokaże ostrzeżenie):
+
+```bash
+py deploy/generate_ssl.py      # tworzy deploy/nginx/ssl/{cert,key}.pem
+docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+```
+
+Aplikacja jest wtedy dostępna pod **`https://localhost:8443`**, a
+`http://localhost:8080` przekierowuje na HTTPS. Nakładka włącza w aplikacji
+`FORCE_HTTPS=1`, więc odpowiedzi zawierają nagłówek HSTS. Certyfikat i klucz
+są wykluczone z repozytorium (`.gitignore`) i z obrazu Dockera (`.dockerignore`).
+
+Testy E2E przez HTTPS:
+
+```bash
+REQUESTS_CA_BUNDLE=deploy/nginx/ssl/cert.pem BASE_URL=https://localhost:8443 py demo.py
+```
+
+### Makefile
+
+Najczęstsze polecenia mają skróty — `make help` wyświetla pełną listę:
+
+| Polecenie        | Działanie                                       |
+|------------------|-------------------------------------------------|
+| `make up` / `make down` | Uruchomienie / zatrzymanie stosu HTTP    |
+| `make up-https`  | Certyfikat (jeśli brak) + stos z HTTPS          |
+| `make seed`      | Dane testowe w działającym kontenerze           |
+| `make test`      | `pytest` z raportem pokrycia                    |
+| `make e2e-docker`| `demo.py` przez nginx                           |
+
+Na Windowsie `make` jest dostępny m.in. w Git for Windows / MSYS2 albo przez
+`choco install make`; każdy cel to zwykłe polecenie opisane wyżej.
 
 ---
 
