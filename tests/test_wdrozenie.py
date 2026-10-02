@@ -134,6 +134,44 @@ def test_po_wlaczeniu_trust_proxy_adres_klienta_jest_odczytywany(app_z_ustawieni
     assert widziany["ip"] == "203.0.113.9"
 
 
+def test_adres_podrobiony_przez_klienta_jest_ignorowany(app_z_ustawieniami):
+    """nginx dopisuje prawdziwy adres na koncu X-Forwarded-For, a klient moze
+    wyslac wlasne wpisy przed nim. Liczy sie tylko ostatni, dodany przez proxy
+    — inaczej zmiana naglowka obchodzilaby limit prob logowania."""
+    aplikacja = app_z_ustawieniami(TRUST_PROXY=True)
+
+    widziany = {}
+
+    @aplikacja.route("/_adres_testowy")
+    def adres():
+        from flask_limiter.util import get_remote_address
+        widziany["ip"] = get_remote_address()
+        return "ok"
+
+    aplikacja.test_client().get(
+        "/_adres_testowy",
+        headers={"X-Forwarded-For": "198.51.100.66, 203.0.113.9"})
+    assert widziany["ip"] == "203.0.113.9"
+
+
+def test_x_forwarded_host_od_klienta_jest_ignorowany(app_z_ustawieniami):
+    """nginx przepuszcza X-Forwarded-Host bez zmian, wiec ufanie mu pozwoliloby
+    klientowi podac aplikacji dowolny adres wlasny."""
+    aplikacja = app_z_ustawieniami(TRUST_PROXY=True)
+
+    widziany = {}
+
+    @aplikacja.route("/_host_testowy")
+    def host():
+        from flask import request
+        widziany["host"] = request.host
+        return "ok"
+
+    aplikacja.test_client().get("/_host_testowy",
+                                headers={"X-Forwarded-Host": "evil.example"})
+    assert widziany["host"] != "evil.example"
+
+
 # ---------------------------------------------------------------
 # Sila klucza podpisujacego
 # ---------------------------------------------------------------
