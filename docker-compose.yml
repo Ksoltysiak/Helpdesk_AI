@@ -1,3 +1,11 @@
+# Domyślny sterownik logów (json-file) nie ma limitu rozmiaru i z czasem
+# potrafi zapełnić dysk serwera. 3 pliki po 10 MB na usługę.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   helpdesk:
     build: .
@@ -24,6 +32,16 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+    # Docker po SIGTERM czeka domyślnie 10 s, a gunicorn daje procesom
+    # roboczym 30 s na dokończenie żądań. Bez tego zatrzymanie mogłoby
+    # przerwać żądania w trakcie obsługi.
+    stop_grace_period: 30s
+    # Aplikacja działa jako zwykły użytkownik na porcie powyżej 1024, więc
+    # nie potrzebuje żadnych uprawnień jądra (capabilities). Zakaz
+    # podnoszenia uprawnień blokuje np. programy z bitem setuid.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *logging
 
   nginx:
     image: nginx:1.27-alpine
@@ -35,6 +53,12 @@ services:
       helpdesk:
         condition: service_healthy
     restart: unless-stopped
+    # Proces główny nginx startuje jako root, otwiera port 80 i przełącza
+    # procesy robocze na użytkownika nginx. Zostawiamy tylko te uprawnienia.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    logging: *logging
 
   # Cykliczne kopie zapasowe bazy (opis: BACKUP.md).
   backup:
@@ -53,6 +77,10 @@ services:
       helpdesk:
         condition: service_healthy
     restart: unless-stopped
+    # Bez cap_drop: skrypty startują jako root, ustawiają właściciela katalogu
+    # kopii i przełączają się (su-exec) na właściciela bazy.
+    security_opt: [no-new-privileges:true]
+    logging: *logging
 
 volumes:
   helpdesk-data:
