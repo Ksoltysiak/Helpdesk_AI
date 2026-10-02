@@ -34,8 +34,12 @@ def create_app():
     #
     # Włączane WYŁĄCZNIE jawnie: gdyby aplikacja stała bezpośrednio w sieci,
     # zaufanie do tego nagłówka pozwoliłoby go podrobić i obejść limit.
+    #
+    # Bez x_host: nginx przekazuje właściwy nagłówek Host, a X-Forwarded-Host
+    # przepuszcza bez zmian od klienta, więc zaufanie do niego pozwalałoby
+    # podać aplikacji dowolny adres (np. do budowania przekierowań).
     if config.TRUST_PROXY:
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
     app.teardown_appcontext(close_db)
     limiter.init_app(app)
