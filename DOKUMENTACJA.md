@@ -97,7 +97,7 @@ i został zintegrowany z opisanym tu API.
 | Język | Python 3.12 | Bogaty ekosystem bibliotek, czytelność kodu |
 | Framework HTTP | Flask 3.1.3 | Mikroframework — nie narzuca struktury, co pozwoliło zaprojektować własny podział warstwowy |
 | Baza danych | SQLite (tryb WAL) | Brak osobnego serwera bazy; wystarczająca dla skali MŚP (ograniczenia — p. 14) |
-| Uwierzytelnianie | PyJWT 2.13.0 | Standard RFC 7519, tokeny bezstanowe |
+| Uwierzytelnianie | PyJWT 2.15.1 | Standard RFC 7519, tokeny bezstanowe |
 | Limity żądań | flask-limiter 4.1.1 | Ochrona punktu logowania |
 | Serwer WSGI | gunicorn 26.1.0 | Wieloprocesowa obsługa żądań |
 | Odwrotne proxy | nginx 1.27 | Buforowanie wolnych klientów, miejsce na terminację TLS |
