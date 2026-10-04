@@ -6,10 +6,16 @@
 deploy/nginx/ssl/
 *.pem
 
-# Lokalne bazy i artefakty
-*.db
-__pycache__/
-*.pyc
+# Lokalne bazy i artefakty. W .dockerignore (inaczej niż w .gitignore)
+# wzorzec bez **/ pasuje tylko w katalogu głównym, a __pycache__ powstaje
+# w każdym pakiecie. Tryb WAL tworzy obok bazy pliki -wal i -shm.
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/__pycache__/
+**/*.pyc
+.venv/
+venv/
 .pytest_cache/
 .coverage
 htmlcov/
