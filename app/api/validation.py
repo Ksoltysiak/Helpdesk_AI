@@ -8,6 +8,17 @@ się nieobsłużonym wyjątkiem i odpowiedzią HTTP 500 zamiast czytelnego 400.
 from flask import request
 
 
+def obiekt_json():
+    """Ciało żądania jako słownik — pusty, gdy to nie jest obiekt JSON.
+
+    Poprawny JSON nie musi być obiektem: `[1]` czy `"tekst"` też się
+    parsują, a dalszy kod woła na nich `.get()` i kończy się błędem 500.
+    Wszystko, co nie jest obiektem, traktujemy jak brak danych.
+    """
+    dane = request.get_json(silent=True)
+    return dane if isinstance(dane, dict) else {}
+
+
 def parametr_calkowity(nazwa, domyslnie, minimum, maksimum):
     """Liczbowy parametr zapytania, przycięty do dozwolonego zakresu.
 

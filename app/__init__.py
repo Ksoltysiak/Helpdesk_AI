@@ -18,6 +18,7 @@ import os
 from flask import Flask, send_from_directory, jsonify, request, redirect
 from flask_swagger_ui import get_swaggerui_blueprint
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import safe_join
 
 from app import config
 from app.api import auth, errors, meta, tickets
@@ -27,6 +28,7 @@ from app.extensions import limiter
 
 def create_app():
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = config.MAX_ROZMIAR_ZADANIA
 
     # Za odwrotnym proxy prawdziwy adres klienta jest w X-Forwarded-For.
     # Bez tego wszystkie żądania wyglądają jakby szły z jednego IP i dzieliłyby
@@ -165,6 +167,10 @@ def _frontend(app):
         # musi dostać błędny status w JSON, a nie stronę HTML z kodem 200.
         if path.startswith("api/"):
             return jsonify({"error": "Nie znaleziono punktu koncowego"}), 404
-        if path and os.path.exists(os.path.join(config.FRONTEND_DIR, path)):
+        # safe_join odrzuca ścieżki wychodzące poza katalog frontendu. Zwykłe
+        # os.path.join z "../" lub ścieżką bezwzględną sprawdzało istnienie
+        # dowolnego pliku na serwerze — różnica 404/200 to zdradzała.
+        plik = safe_join(config.FRONTEND_DIR, path) if path else None
+        if plik and os.path.isfile(plik):
             return send_from_directory(config.FRONTEND_DIR, path)
         return send_from_directory(config.FRONTEND_DIR, "index.html")

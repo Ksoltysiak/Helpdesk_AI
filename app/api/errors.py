@@ -23,6 +23,7 @@ def zarejestruj(app):
 
     app.register_error_handler(404, blad_json(404, "Nie znaleziono punktu koncowego"))
     app.register_error_handler(405, blad_json(405, "Metoda niedozwolona dla tej sciezki"))
+    app.register_error_handler(413, blad_json(413, "Zadanie jest za duze"))
     app.register_error_handler(429, blad_json(429, "Zbyt wiele zadan — sprobuj ponownie pozniej"))
 
     @app.errorhandler(500)

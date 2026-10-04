@@ -22,27 +22,21 @@ def current_user():
     return users.po_id(uid)
 
 
-def login_required(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        user = current_user()
-        if not user:
-            return jsonify({"error": "Wymagana autoryzacja"}), 401
-        g.user = user
-        return f(*args, **kwargs)
-    return wrapper
-
-
 def roles_required(*role):
+    """Wymaga zalogowania i — jeśli podano role — jednej z nich."""
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
             user = current_user()
             if not user:
                 return jsonify({"error": "Wymagana autoryzacja"}), 401
-            if user["role"] not in role:
+            if role and user["role"] not in role:
                 return jsonify({"error": "Brak uprawnien dla tej operacji"}), 403
             g.user = user
             return f(*args, **kwargs)
         return wrapper
     return decorator
+
+
+# Dowolny zalogowany użytkownik, bez względu na rolę.
+login_required = roles_required()

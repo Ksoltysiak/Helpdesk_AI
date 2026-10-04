@@ -5,7 +5,7 @@ Dzięki temu widać w jednym miejscu, jakimi zapytaniami system obciąża bazę,
 i łatwiej sprawdzić, że każde filtrowanie respektuje granicę dostępu.
 """
 
-from app.data.database import get_db
+from app.data.database import get_db, czas_utc
 
 # Nazwiska dołączane przez LEFT JOIN — interfejs pokazuje osobę zamiast
 # surowego identyfikatora.
@@ -35,10 +35,10 @@ def serialize(t):
         "assigned_to":    t["assigned_to"],
         "ai_categorized": bool(t["ai_categorized"]),
         "ai_pewnosc":     t["ai_pewnosc"] if "ai_pewnosc" in keys else None,
-        "sla_deadline":   t["sla_deadline"],
-        "created_at":     t["created_at"],
-        "updated_at":     t["updated_at"],
-        "closed_at":      t["closed_at"],
+        "sla_deadline":   czas_utc(t["sla_deadline"]),
+        "created_at":     czas_utc(t["created_at"]),
+        "updated_at":     czas_utc(t["updated_at"]),
+        "closed_at":      czas_utc(t["closed_at"]),
     }
     if "created_by_name" in keys:
         data["created_by_name"] = t["created_by_name"]
@@ -102,32 +102,40 @@ def istnieje(ticket_id):
     ).fetchone() is not None
 
 
-def utworz(title, description, created_by):
+def utworz(title, description, created_by, kategoria, priorytet, pewnosc, sla_deadline):
+    """Zgłoszenie od razu z wynikiem kategoryzacji — jednym zapisem.
+
+    Kategoryzacja nie potrzebuje identyfikatora zgłoszenia, więc nie ma
+    powodu zapisywać wiersza, a potem go poprawiać drugim UPDATE.
+    """
     return get_db().execute(
-        "INSERT INTO tickets (title, description, created_by) VALUES (?,?,?)",
-        (title, description, created_by),
+        "INSERT INTO tickets (title, description, created_by, category, priority,"
+        " ai_categorized, ai_pewnosc, sla_deadline) VALUES (?,?,?,?,?,1,?,?)",
+        (title, description, created_by, kategoria, priorytet, pewnosc, sla_deadline),
     ).lastrowid
 
 
-def zapisz_kategoryzacje(ticket_id, kategoria, priorytet, pewnosc, sla_deadline):
-    get_db().execute(
-        "UPDATE tickets SET category=?, priority=?, ai_categorized=1, ai_pewnosc=?,"
-        " sla_deadline=?, updated_at=datetime('now') WHERE id=?",
-        (kategoria, priorytet, pewnosc, sla_deadline, ticket_id),
-    )
+def zmien_status(ticket_id, obecny_status, nowy_status, przypisz_do=None, zamknij=False):
+    """Zmiana statusu pod warunkiem, że nikt go w międzyczasie nie zmienił.
 
+    Zwraca False, gdy status w bazie jest już inny niż `obecny_status` —
+    np. dwóch techników jednocześnie podejmuje to samo zgłoszenie. Bez tego
+    warunku obaj przeszliby walidację na nieaktualnym odczycie, a drugi
+    zapis nadpisałby przypisanie pierwszego.
 
-def zmien_status(ticket_id, nowy_status, przypisz_do=None, zamknij=False):
+    Przypisanie przy podjęciu też jest warunkowe (COALESCE) — nie zastępuje
+    opiekuna ustawionego w międzyczasie.
+    """
     sql = "UPDATE tickets SET status = ?, updated_at = datetime('now')"
     params = [nowy_status]
     if przypisz_do is not None:
-        sql += ", assigned_to = ?"
+        sql += ", assigned_to = COALESCE(assigned_to, ?)"
         params.append(przypisz_do)
     if zamknij:
         sql += ", closed_at = datetime('now')"
-    sql += " WHERE id = ?"
-    params.append(ticket_id)
-    get_db().execute(sql, params)
+    sql += " WHERE id = ? AND status = ?"
+    params += [ticket_id, obecny_status]
+    return get_db().execute(sql, params).rowcount == 1
 
 
 def zmien_kategorie(ticket_id, kategoria):
@@ -152,7 +160,12 @@ def notatki(ticket_id, tylko_jawne):
            "JOIN users u ON n.author_id = u.id WHERE n.ticket_id = ?")
     if tylko_jawne:
         sql += " AND n.internal = 0"
-    return get_db().execute(sql + " ORDER BY n.id", (ticket_id,)).fetchall()
+    rows = get_db().execute(sql + " ORDER BY n.id", (ticket_id,)).fetchall()
+    return [
+        {"author": n["author"], "content": n["content"],
+         "internal": bool(n["internal"]), "created_at": czas_utc(n["created_at"])}
+        for n in rows
+    ]
 
 
 def dodaj_notatke(ticket_id, author_id, content, internal):
@@ -164,8 +177,16 @@ def dodaj_notatke(ticket_id, author_id, content, internal):
 
 # --- Statystyki --------------------------------------------------------
 
-def statystyki(where, params):
+def _warunek_autora(autor_id):
+    """Ograniczenie statystyk do zgłoszeń jednego autora (pulpit pracownika)."""
+    if autor_id is None:
+        return "", ()
+    return " WHERE created_by = ?", (autor_id,)
+
+
+def statystyki(autor_id=None):
     """Liczniki pulpitu jednym przejściem po tabeli zamiast pięcioma."""
+    where, params = _warunek_autora(autor_id)
     wiersz = get_db().execute(f"""
         SELECT
             COUNT(*)                                                AS wszystkie,
@@ -182,7 +203,8 @@ def statystyki(where, params):
     return {k: wiersz[k] or 0 for k in klucze}
 
 
-def rozklad_kategorii(where, params):
+def rozklad_kategorii(autor_id=None):
+    where, params = _warunek_autora(autor_id)
     rows = get_db().execute(
         f"SELECT category, COUNT(*) c FROM tickets{where}"
         + (" AND" if where else " WHERE") + " category IS NOT NULL"

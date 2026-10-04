@@ -1,8 +1,11 @@
 """Punkty końcowe uwierzytelniania."""
 
-from flask import Blueprint, request, jsonify, g
-from werkzeug.security import check_password_hash
+from functools import cache
 
+from flask import Blueprint, jsonify, g
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from app.api.validation import obiekt_json
 from app.data import users
 from app.extensions import limiter, klucz_logowania
 from app.security.decorators import login_required
@@ -11,11 +14,23 @@ from app.security.tokens import generate_token
 bp = Blueprint("auth", __name__)
 
 
+@cache
+def _hash_zastepczy():
+    """Hash sprawdzany, gdy konto nie istnieje.
+
+    Weryfikacja hasła jest celowo kosztowna (dziesiątki milisekund). Gdyby
+    przy nieznanym loginie ją pomijać, odpowiedź przychodziłaby wyraźnie
+    szybciej — a czas odpowiedzi zdradzałby, które konta istnieją, mimo
+    identycznego komunikatu. Liczony raz na proces, przy pierwszym użyciu.
+    """
+    return generate_password_hash("konto-nie-istnieje")
+
+
 @bp.route("/auth/login", methods=["POST"])
 @limiter.limit("10 per minute; 30 per hour")                            # na adres IP
 @limiter.limit("5 per minute; 20 per hour", key_func=klucz_logowania)   # na konto
 def login():
-    dane = request.get_json(silent=True) or {}
+    dane = obiekt_json()
     username = dane.get("username", "")
     password = dane.get("password", "")
 
@@ -25,7 +40,8 @@ def login():
         return jsonify({"error": "Nieprawidlowy login lub haslo"}), 401
 
     user = users.po_nazwie_z_hasłem(username)
-    if not user or not check_password_hash(user["password"], password):
+    hash_hasla = user["password"] if user else _hash_zastepczy()
+    if not check_password_hash(hash_hasla, password) or not user:
         return jsonify({"error": "Nieprawidlowy login lub haslo"}), 401
 
     return jsonify({

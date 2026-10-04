@@ -6,6 +6,7 @@ modułu.
 """
 
 import sqlite3
+from datetime import datetime, timezone
 
 from flask import g
 
@@ -75,6 +76,11 @@ CREATE INDEX IF NOT EXISTS idx_tickets_autor_id        ON tickets(created_by, id
 -- Pobieranie notatek i historii konkretnego zgloszenia.
 CREATE INDEX IF NOT EXISTS idx_notes_ticket     ON notes(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_audit_ticket     ON audit_log(ticket_id);
+
+-- Statystyki skutecznosci AI licza korekty po rodzaju akcji. Dziennik audytu
+-- rosnie najszybciej (kilka wpisow na zgloszenie), a bez indeksu kazde
+-- otwarcie zestawienia przeszukiwaloby go w calosci.
+CREATE INDEX IF NOT EXISTS idx_audit_akcja      ON audit_log(action, ticket_id);
 """
 
 # Ustawienia obowiazujace dla KAZDEGO polaczenia — nie sa zapisywane w pliku
@@ -100,6 +106,27 @@ PRAGMA_TRWALA = ("journal_mode", "WAL")
 MIGRACJE = (
     ("tickets", "ai_pewnosc", "REAL"),
 )
+
+
+def czas_utc(wartosc):
+    """Znacznik czasu z bazy -> ISO 8601 z jawną strefą UTC.
+
+    `datetime('now')` w SQLite zapisuje czas UTC, ale bez oznaczenia strefy
+    („2026-07-25 11:40:00"). Przeglądarka czyta taki napis jako czas
+    LOKALNY, więc użytkownik w Polsce widział godziny przesunięte o 1–2 h,
+    a część przeglądarek nie umie go w ogóle sparsować przez spację.
+    """
+    if not wartosc:
+        return wartosc
+    return wartosc.replace(" ", "T") + ("" if wartosc.endswith("Z") else "Z")
+
+
+def teraz_utc(przesuniecie=None):
+    """Bieżący czas UTC w formacie, w jakim zapisuje go SQLite."""
+    chwila = datetime.now(timezone.utc)
+    if przesuniecie is not None:
+        chwila += przesuniecie
+    return chwila.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _zastosuj_pragmy(conn):

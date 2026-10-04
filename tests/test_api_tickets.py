@@ -212,10 +212,58 @@ def test_technik_przypisuje_zgloszenie_innej_osobie(client, technik):
     assert client.get("/api/tickets/1", headers=technik).get_json()["assigned_to"] == 4
 
 
-@pytest.mark.parametrize("wartosc", ["3", 1.5, None, {"id": 3}])
+@pytest.mark.parametrize("wartosc", ["3", 1.5, None, {"id": 3}, True])
 def test_przypisanie_musi_byc_liczba_calkowita(client, technik, wartosc):
     assert client.patch("/api/tickets/1", headers=technik,
                         json={"assigned_to": wartosc}).status_code == 400
+
+
+@pytest.mark.parametrize("osoba", [999, 1])   # nieistniejacy, pracownik
+def test_przypisac_mozna_tylko_istniejacego_technika_lub_admina(client, technik, osoba):
+    resp = client.patch("/api/tickets/1", headers=technik, json={"assigned_to": osoba})
+    assert resp.status_code == 400
+    assert client.get("/api/tickets/1", headers=technik).get_json()["assigned_to"] is None
+
+
+def test_blad_w_jednym_polu_nie_zapisuje_pozostalych(client, technik):
+    """Walidacja przed zapisem — PATCH jest wszystko albo nic."""
+    resp = client.patch("/api/tickets/1", headers=technik,
+                        json={"status": "W trakcie", "category": "Nieznana"})
+    assert resp.status_code == 400
+    assert client.get("/api/tickets/1", headers=technik).get_json()["status"] == "Nowe"
+    akcje = [w["action"] for w in
+             client.get("/api/tickets/1/audit", headers=technik).get_json()]
+    assert "Zmiana statusu" not in akcje
+
+
+def test_rownoczesna_zmiana_statusu_daje_409(client, technik, monkeypatch):
+    """Drugi technik dziala na nieaktualnym odczycie — nie moze nadpisac pierwszego."""
+    from app.data import tickets as repo
+    client.patch("/api/tickets/1", headers=technik, json={"status": "W trakcie"})
+
+    # Symulacja wyscigu: odczyt sprzed zmiany wykonanej przez kogos innego.
+    prawdziwe = repo.pobierz_surowe
+    monkeypatch.setattr(repo, "pobierz_surowe",
+                        lambda tid: {**prawdziwe(tid), "status": "Nowe", "assigned_to": None})
+
+    resp = client.patch("/api/tickets/1", headers=technik, json={"status": "W trakcie"})
+    assert resp.status_code == 409
+    assert resp.is_json
+
+
+def test_podjecie_nie_nadpisuje_opiekuna_ustawionego_w_miedzyczasie(app):
+    from app.data import tickets as repo
+    with app.app_context():
+        repo.zmien_przypisanie(1, 4)
+        assert repo.zmien_status(1, "Nowe", "W trakcie", przypisz_do=3)
+        assert repo.pobierz_surowe(1)["assigned_to"] == 4
+
+
+def test_pierwsze_przypisanie_ma_pusta_poprzednia_wartosc_w_audycie(client, technik):
+    client.patch("/api/tickets/1", headers=technik, json={"assigned_to": 4})
+    wpis = next(w for w in client.get("/api/tickets/1/audit", headers=technik).get_json()
+                if w["action"] == "Przypisanie")
+    assert wpis["old"] is None and wpis["new"] == "4"
 
 
 def test_mozna_zmienic_kilka_pol_naraz(client, technik):
@@ -401,6 +449,35 @@ def test_kategoryzacje_ai_podpisuje_system(client, pracownik, technik):
                       json={"title": "Test", "description": "Opis"}).get_json()["id"]
     audyt = client.get(f"/api/tickets/{tid}/audit", headers=technik).get_json()
     assert next(w for w in audyt if w["action"] == "Kategoryzacja AI")["user"] == "System AI"
+
+
+def test_audyt_nieistniejacego_zgloszenia_daje_404(client, technik):
+    assert client.get("/api/tickets/999/audit", headers=technik).status_code == 404
+
+
+def test_znaczniki_czasu_maja_jawna_strefe_utc(client, pracownik, technik):
+    """Bez strefy przegladarka czyta czas UTC jako lokalny i przesuwa godziny."""
+    nowe = client.post("/api/tickets", headers=pracownik,
+                       json={"title": "Drukarka", "description": "brak tonera"}).get_json()
+    assert nowe["sla_deadline"].endswith("Z")
+
+    szczegoly = client.get(f"/api/tickets/{nowe['id']}", headers=technik).get_json()
+    for pole in ("created_at", "updated_at", "sla_deadline"):
+        assert szczegoly[pole].endswith("Z") and "T" in szczegoly[pole], pole
+    for wpis in client.get(f"/api/tickets/{nowe['id']}/audit", headers=technik).get_json():
+        assert wpis["timestamp"].endswith("Z")
+
+
+def test_termin_sla_jest_liczony_od_chwili_utworzenia(client, pracownik, technik):
+    """Termin i data utworzenia musza byc w tej samej strefie czasowej."""
+    from datetime import datetime
+    from app.domain.ai import SLA_HOURS
+    nowe = client.post("/api/tickets", headers=pracownik,
+                       json={"title": "Drukarka", "description": "brak tonera"}).get_json()
+    t = client.get(f"/api/tickets/{nowe['id']}", headers=technik).get_json()
+    roznica = (datetime.fromisoformat(t["sla_deadline"])
+               - datetime.fromisoformat(t["created_at"]))
+    assert abs(roznica.total_seconds() - SLA_HOURS[t["priority"]] * 3600) < 60
 
 
 def test_pracownik_nie_ma_dostepu_do_audytu(client, pracownik):

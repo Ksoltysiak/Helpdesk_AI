@@ -61,6 +61,22 @@ def test_komunikat_bledu_nie_zdradza_czy_login_istnieje(client):
     assert zle_haslo.get_json() == zly_login.get_json()
 
 
+def test_nieznany_login_tez_sprawdza_hash(client, monkeypatch):
+    """Pominiecie kosztownego sprawdzenia hasla zdradzaloby czasem odpowiedzi,
+    ktore konta istnieja — mimo identycznego komunikatu."""
+    from app.api import auth
+    wywolania = []
+    prawdziwe = auth.check_password_hash
+    monkeypatch.setattr(auth, "check_password_hash",
+                        lambda h, p: wywolania.append(h) or prawdziwe(h, p))
+
+    client.post("/api/auth/login", json={"username": "nie.ma.takiego", "password": "x"})
+    client.post("/api/auth/login", json={"username": "admin", "password": "x"})
+    assert len(wywolania) == 2
+    # Hash zastepczy ma ten sam algorytm co prawdziwe — inaczej koszt by sie roznil.
+    assert wywolania[0].split("$")[0] == wywolania[1].split("$")[0]
+
+
 def test_typ_inny_niz_tekst_nie_powoduje_bledu_serwera(client):
     """Proba pomylenia typow (np. {"$ne": ...}) musi konczyc sie 401, nie 500."""
     resp = client.post("/api/auth/login", json={"username": {"a": 1}, "password": ["b"]})

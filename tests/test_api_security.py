@@ -193,3 +193,13 @@ def test_limit_nie_dotyczy_zwyklych_odczytow(rate_limited_client, technik):
         for _ in range(15)
     ]
     assert kody.count(200) == 15
+
+
+@pytest.mark.parametrize("sciezka", [
+    "/..%2Fapp%2Fconfig.py", "/..%2F..%2Fetc%2Fhosts", "/%2Fetc%2Fhosts",
+])
+def test_frontend_nie_zdradza_plikow_spoza_katalogu(client, sciezka):
+    """Sciezka spoza frontendu ma dostac strone aplikacji, jak kazda nieznana."""
+    resp = client.get(sciezka)
+    assert resp.status_code == 200
+    assert b"<!DOCTYPE html>" in resp.data

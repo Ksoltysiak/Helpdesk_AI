@@ -99,7 +99,7 @@ Gunicorn sam obsługuje HTTP, więc warto wiedzieć, co dokłada proxy:
 |---|---|
 | **Buforowanie wolnych klientów** | Bez tego klient wysyłający żądanie bajt po bajcie zajmuje workera gunicorna na cały czas transmisji. Przy 2 workerach wystarczy dwóch takich klientów, by zablokować usługę. |
 | **Terminacja TLS** | Certyfikat kończy się na nginx (`nginx-https.conf`, nakładka `docker-compose.https.yml`); aplikacja dostaje `X-Forwarded-Proto` i sama nie obsługuje TLS. |
-| **Limit rozmiaru żądania** | `client_max_body_size 1m` odcina duże ładunki, zanim dotrą do aplikacji. |
+| **Limit rozmiaru żądania** | `client_max_body_size 1m` odcina duże ładunki, zanim dotrą do aplikacji. Sama aplikacja ma własny, ciaśniejszy limit 64 KB (`MAX_ROZMIAR_ZADANIA`, odpowiedź 413) — działa też bez proxy. |
 | **Limity czasu** | Zerwane połączenia nie trzymają zasobów w nieskończoność. |
 | **Jeden punkt wejścia** | Gdy dojdą kolejne usługi, adresacja się nie zmienia. |
 

@@ -110,7 +110,49 @@ def test_bardzo_duze_zadanie_jest_odrzucane(client, pracownik):
     """Ladunek znacznie powyzej limitu musi zostac odrzucony, nie przetworzony."""
     resp = client.post("/api/tickets", headers=pracownik,
                        json={"title": "x" * 100_000, "description": "y" * 100_000})
-    assert resp.status_code == 400
+    assert resp.status_code == 413
+    assert resp.is_json
+
+
+def test_najdluzszy_poprawny_opis_miesci_sie_w_limicie_zadania(client, pracownik):
+    """Limit rozmiaru nie moze odrzucac danych, ktore walidacja pol przepuszcza.
+
+    Najgorszy przypadek: kazdy znak zakodowany jako \\uXXXX (6 bajtow).
+    """
+    import json
+    from app import config
+    cialo = json.dumps({"title": "\u0105" * config.TITLE_MAX,
+                        "description": "\u0105" * config.DESC_MAX}, ensure_ascii=True)
+    resp = client.post("/api/tickets", headers=pracownik, data=cialo,
+                       content_type="application/json")
+    assert resp.status_code == 201
+
+
+# Poprawny JSON, ktory nie jest obiektem — wczesniej `.get()` na liscie
+# lub napisie konczyl sie bledem 500.
+NIE_OBIEKT = [[1, 2], "tekst", 42, True]
+
+
+@pytest.mark.parametrize("cialo", NIE_OBIEKT)
+@pytest.mark.parametrize("metoda,sciezka,rola,oczekiwany", [
+    ("post",  "/api/tickets",         "pracownik", 400),
+    ("patch", "/api/tickets/1",       "technik",   400),
+    ("post",  "/api/tickets/1/notes", "technik",   400),
+    ("post",  "/api/ai/categorize",   "pracownik", 400),
+    ("post",  "/api/auth/login",      None,        401),
+])
+def test_cialo_niebedace_obiektem_nie_powoduje_bledu_serwera(
+        request, client, cialo, metoda, sciezka, rola, oczekiwany):
+    naglowki = request.getfixturevalue(rola) if rola else {}
+    resp = getattr(client, metoda)(sciezka, headers=naglowki, json=cialo)
+    assert resp.status_code == oczekiwany
+    assert resp.is_json
+
+
+@pytest.mark.parametrize("cialo", NIE_OBIEKT)
+def test_logowanie_z_limitem_akceptuje_cialo_niebedace_obiektem(rate_limited_client, cialo):
+    """Klucz limitu logowania tez czyta cialo zadania — przed trasa."""
+    assert rate_limited_client.post("/api/auth/login", json=cialo).status_code == 401
 
 
 def test_token_z_nieliczbowym_identyfikatorem_jest_odrzucany(client):
