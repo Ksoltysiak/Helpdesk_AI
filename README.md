@@ -46,6 +46,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 | `deploy/nginx/`        | Konfiguracja odwrotnego proxy (HTTP oraz wariant z TLS)    |
 | `deploy/generate_ssl.py` | Samopodpisany certyfikat TLS do uruchomień lokalnych     |
 | `docker-compose.https.yml` | Nakładka włączająca HTTPS na nginx                     |
+| `deploy/backup/`       | Kontener kopii zapasowych bazy — harmonogram, odtwarzanie  |
 | `Makefile`             | Skróty najczęstszych poleceń (`make help`)                 |
 | `openapi.yaml`         | Specyfikacja API — źródło prawdy dla dokumentacji          |
 | `DOKUMENTACJA.md`      | **Opracowanie całościowe projektu** (dokumentacja pracy)   |
@@ -53,6 +54,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 | `SECURITY.md`          | Audyt bezpieczeństwa — weryfikacja 20 zabezpieczeń         |
 | `PERFORMANCE.md`       | Pomiary wydajności i wprowadzone optymalizacje             |
 | `AI.md`                | Moduł kategoryzacji — działanie, skuteczność, ograniczenia |
+| `BACKUP.md`            | Kopie zapasowe i odtwarzanie bazy po awarii                |
 | `seed.py`              | Wypełnienie bazy danymi testowymi                          |
 | `demo.py`              | Testy E2E (adres przez `BASE_URL`)                         |
 | `tests/`               | Testy jednostkowe, integracyjne i architektoniczne         |
@@ -109,6 +111,23 @@ Aplikacja jest wtedy dostępna pod **`https://localhost:8443`**, a
 `FORCE_HTTPS=1`, więc odpowiedzi zawierają nagłówek HSTS. Certyfikat i klucz
 są wykluczone z repozytorium (`.gitignore`) i z obrazu Dockera (`.dockerignore`).
 
+### Kopie zapasowe
+
+Razem ze stosem startuje kontener `backup`, który codziennie o 2:00 robi
+zweryfikowaną kopię bazy i przechowuje 14 najnowszych. Kopia na żądanie
+i odtworzenie:
+
+```bash
+make backup                                      # kopia teraz
+make backups                                     # lista kopii
+make restore                                     # odtworzenie najnowszej
+make restore BACKUP_FILE=helpdesk-20261002-020000.db.gz   # wybranej
+```
+
+`make restore` sam zatrzymuje aplikację na czas podmiany bazy i uruchamia ją
+z powrotem. Harmonogram, miejsce przechowywania kopii, test odtwarzania
+i ograniczenia opisuje **[BACKUP.md](BACKUP.md)**.
+
 Testy E2E przez HTTPS:
 
 ```bash
@@ -124,6 +143,7 @@ Najczęstsze polecenia mają skróty — `make help` wyświetla pełną listę:
 | `make up` / `make down` | Uruchomienie / zatrzymanie stosu HTTP    |
 | `make up-https`  | Certyfikat (jeśli brak) + stos z HTTPS          |
 | `make seed`      | Dane testowe w działającym kontenerze           |
+| `make backup` / `make restore` | Kopia bazy / odtworzenie najnowszej kopii |
 | `make test`      | `pytest` z raportem pokrycia                    |
 | `make e2e-docker`| `demo.py` przez nginx                           |
 
