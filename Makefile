@@ -12,8 +12,11 @@ endif
 COMPOSE       = docker compose
 COMPOSE_HTTPS = docker compose -f docker-compose.yml -f docker-compose.https.yml
 
+# Kopia do odtworzenia: latest albo nazwa pliku z `make backups`.
+BACKUP_FILE ?= latest
+
 .DEFAULT_GOAL := help
-.PHONY: help up down restart logs seed ps certs up-https down-https test e2e e2e-docker clean
+.PHONY: help up down restart logs seed ps certs up-https down-https backup backups restore test-backup test e2e e2e-docker clean
 
 help:
 	@echo "Helpdesk AI - skroty polecen"
@@ -30,6 +33,12 @@ help:
 	@echo "    make certs       generuje samopodpisany certyfikat"
 	@echo "    make up-https    uruchamia stos z TLS na nginx"
 	@echo "    make down-https  zatrzymuje stos HTTPS"
+	@echo ""
+	@echo "  Kopie zapasowe (opis: BACKUP.md)"
+	@echo "    make backup      kopia bazy na zadanie"
+	@echo "    make backups     lista kopii"
+	@echo "    make restore     odtwarza najnowsza kopie (BACKUP_FILE=nazwa - wybrana)"
+	@echo "    make test-backup test pelnego cyklu kopia -> awaria -> odtworzenie"
 	@echo ""
 	@echo "  Testy"
 	@echo "    make test        pytest z pokryciem kodu"
@@ -64,6 +73,22 @@ up-https: certs
 
 down-https:
 	$(COMPOSE_HTTPS) down
+
+backup:
+	$(COMPOSE) exec backup backup.sh
+
+backups:
+	$(COMPOSE) exec backup restore.sh --list
+
+# Aplikacja musi stać na czas podmiany pliku bazy. Startujemy ją z powrotem
+# także wtedy, gdy odtwarzanie się nie powiedzie — restore.sh nie rusza
+# wtedy obecnej bazy, więc nie ma powodu zostawiać usługi wyłączonej.
+restore:
+	$(COMPOSE) stop helpdesk
+	$(COMPOSE) run --rm --no-deps backup restore.sh $(BACKUP_FILE); 	status=$$?; $(COMPOSE) start helpdesk; exit $$status
+
+test-backup:
+	bash deploy/backup/test-backup.sh
 
 test:
 	$(PYTHON) -m pytest --cov --cov-report=term-missing
