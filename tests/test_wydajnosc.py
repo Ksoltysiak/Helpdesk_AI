@@ -370,6 +370,16 @@ def test_sprawdzenie_polaczenia_potwierdza_dzialajaca_baze(app):
         assert database.sprawdz_polaczenie() is True
 
 
+def test_sprawdzenie_polaczenia_wykrywa_brak_bazy(app, tmp_path, monkeypatch):
+    """Po usunieciu pliku bazy SQLite po cichu tworzy w jego miejscu pusty
+    plik. Samo SELECT 1 tego nie wykrywalo i sonda zglaszala zdrowa aplikacje,
+    ktora nie miala zadnych danych."""
+    from app.data import database
+    monkeypatch.setattr(db_module, "DB_PATH", str(tmp_path / "nie_ma.db"))
+    with app.app_context():
+        assert database.sprawdz_polaczenie() is False
+
+
 def test_health_zglasza_503_gdy_baza_nie_odpowiada(client, monkeypatch):
     """Sonda ma wykryc awarie bazy, a nie raportowac 'ok' mimo problemu."""
     from app.api import meta

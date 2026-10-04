@@ -132,11 +132,12 @@ def close_db(exception=None):
 def sprawdz_polaczenie() -> bool:
     """Czy baza odpowiada — na potrzeby kontroli zdrowia.
 
-    Najtańsze możliwe zapytanie: potwierdza, że plik jest osiągalny i że
-    połączenie da się otworzyć, bez dotykania danych.
+    Samo `SELECT 1` nie czyta pliku bazy, więc przechodziło nawet wtedy, gdy
+    bazy nie było: SQLite tworzy w jej miejscu pusty plik. Odwołanie do
+    tabeli wymaga odczytu schematu i jednej strony danych, a nadal jest tanie.
     """
     try:
-        get_db().execute("SELECT 1").fetchone()
+        get_db().execute("SELECT 1 FROM tickets LIMIT 1").fetchone()
         return True
     except Exception:
         return False
