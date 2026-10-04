@@ -4,7 +4,7 @@ Wpisy audytu pełnią podwójną rolę: są historią zgłoszenia dla technika o
 źródłem danych o tym, jak często człowiek poprawia moduł AI.
 """
 
-from app.data.database import get_db
+from app.data.database import get_db, czas_utc
 
 AKCJA_ZMIANA_KATEGORII = "Zmiana kategorii"
 
@@ -30,17 +30,26 @@ def historia(ticket_id):
          "user": r["user_name"] or "System AI",
          "old": r["old_value"],
          "new": r["new_value"],
-         "timestamp": r["timestamp"]}
+         "timestamp": czas_utc(r["timestamp"])}
         for r in rows
     ]
 
 
 # --- Skuteczność kategoryzacji ----------------------------------------
 
-def liczba_zgloszen_z_ai():
-    return get_db().execute(
-        "SELECT COUNT(*) c FROM tickets WHERE ai_categorized = 1"
-    ).fetchone()["c"]
+def podsumowanie_kategoryzacji(prog):
+    """Liczba zgłoszeń z AI, niepewnych i średnia pewność — jednym przejściem.
+
+    Trzy osobne zapytania przeszukiwały tę samą tabelę trzy razy.
+    """
+    wiersz = get_db().execute(
+        "SELECT COUNT(*) AS razem,"
+        "       COALESCE(SUM(ai_pewnosc < ?), 0) AS niepewne,"
+        "       AVG(ai_pewnosc) AS srednia"
+        " FROM tickets WHERE ai_categorized = 1",
+        (prog,),
+    ).fetchone()
+    return wiersz["razem"], wiersz["niepewne"], wiersz["srednia"]
 
 
 def liczba_recznych_korekt():
@@ -60,16 +69,3 @@ def najczestsze_pomylki(limit=5):
         (AKCJA_ZMIANA_KATEGORII, limit),
     ).fetchall()
     return [{"z": r["z"], "na": r["na"], "liczba": r["c"]} for r in rows]
-
-
-def liczba_niepewnych(prog):
-    return get_db().execute(
-        "SELECT COUNT(*) c FROM tickets WHERE ai_categorized = 1 AND ai_pewnosc < ?",
-        (prog,),
-    ).fetchone()["c"]
-
-
-def srednia_pewnosc():
-    return get_db().execute(
-        "SELECT AVG(ai_pewnosc) s FROM tickets WHERE ai_pewnosc IS NOT NULL"
-    ).fetchone()["s"]

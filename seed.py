@@ -1,7 +1,7 @@
 import sqlite3
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from werkzeug.security import generate_password_hash
 from app import config
 from app.data.database import init_db
@@ -57,12 +57,14 @@ def seed():
             (username, hashed, name, role, email),
         )
 
-    now = datetime.now()
+    # UTC w formacie SQLite — tak samo jak znaczniki zapisywane przez aplikacje.
+    now = datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None)
     for title, desc, status, created_by, assigned_to, days_ago in TICKETS:
         ai = categorize(title, desc)
-        created = (now - timedelta(days=days_ago, hours=3)).isoformat(timespec="seconds")
-        deadline = (datetime.fromisoformat(created) + timedelta(hours=SLA_HOURS[ai["priorytet"]])).isoformat(timespec="seconds")
-        closed = now.isoformat(timespec="seconds") if status == "Zamkniete" else None
+        poczatek = now - timedelta(days=days_ago, hours=3)
+        created = str(poczatek)
+        deadline = str(poczatek + timedelta(hours=SLA_HOURS[ai["priorytet"]]))
+        closed = str(now) if status == "Zamkniete" else None
 
         tid = conn.execute(
             """INSERT INTO tickets

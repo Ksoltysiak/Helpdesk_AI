@@ -1,7 +1,8 @@
 """Punkty końcowe pomocnicze: kontrola zdrowia, pulpit i moduł AI."""
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, jsonify, g
 
+from app.api.validation import obiekt_json
 from app.data import audit
 from app.data import tickets as repo
 from app.data.database import sprawdz_polaczenie
@@ -31,14 +32,11 @@ def health():
 def dashboard():
     # Pracownik dostaje statystyki WŁASNYCH zgłoszeń — pulpit ma pokazywać to
     # samo, co jego lista, a liczby z całego systemu nie są mu potrzebne.
-    if g.user["role"] == "pracownik":
-        where, params = " WHERE created_by = ?", (g.user["id"],)
-    else:
-        where, params = "", ()
+    autor_id = g.user["id"] if g.user["role"] == "pracownik" else None
 
     return jsonify({
-        "statystyki":   repo.statystyki(where, params),
-        "wg_kategorii": repo.rozklad_kategorii(where, params),
+        "statystyki":   repo.statystyki(autor_id),
+        "wg_kategorii": repo.rozklad_kategorii(autor_id),
     })
 
 
@@ -51,16 +49,15 @@ def skutecznosc():
     konkretnym zgłoszeniu. Zamiast deklarować skuteczność, wyliczamy ją z tego,
     jak często człowiek poprawia maszynę.
     """
-    razem = audit.liczba_zgloszen_z_ai()
+    razem, niepewne, srednia = audit.podsumowanie_kategoryzacji(PROG_PEWNOSCI)
     poprawione = audit.liczba_recznych_korekt()
-    srednia = audit.srednia_pewnosc()
 
     return jsonify({
         "zgloszen_z_ai":        razem,
         "poprawionych_recznie": poprawione,
         "skutecznosc":          round(1 - poprawione / razem, 3) if razem else None,
         "srednia_pewnosc":      round(srednia, 3) if srednia is not None else None,
-        "wymaga_weryfikacji":   audit.liczba_niepewnych(PROG_PEWNOSCI),
+        "wymaga_weryfikacji":   niepewne,
         "prog_pewnosci":        PROG_PEWNOSCI,
         "najczestsze_pomylki":  audit.najczestsze_pomylki(),
     })
@@ -70,7 +67,7 @@ def skutecznosc():
 @login_required
 def kategoryzuj():
     """Testowe uruchomienie kategoryzacji bez zapisywania zgłoszenia."""
-    dane = request.get_json(silent=True) or {}
+    dane = obiekt_json()
     title = dane.get("title", "")
     description = dane.get("description", "")
 

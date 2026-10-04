@@ -37,7 +37,14 @@ info:
     | 401 | Brak tokenu, token wygasły lub nieprawidłowy |
     | 403 | Token poprawny, ale rola nie pozwala na tę operację |
     | 404 | Zasób nie istnieje |
+    | 409 | Zgłoszenie zmieniono w międzyczasie — należy je odświeżyć |
+    | 413 | Ciało żądania przekracza 64 KB |
     | 429 | Przekroczony limit prób logowania |
+
+    ## Znaczniki czasu
+
+    Wszystkie daty są w UTC, w formacie ISO 8601 z oznaczeniem strefy
+    (`2026-07-25T11:40:00Z`). Przeliczenie na czas lokalny należy do klienta.
 
 servers:
   - url: /api
@@ -143,6 +150,8 @@ paths:
                     example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
         "401":
           $ref: "#/components/responses/BledneDaneLogowania"
+        "413":
+          $ref: "#/components/responses/ZaDuzeZadanie"
         "429":
           $ref: "#/components/responses/ZaWieleZadan"
 
@@ -334,13 +343,15 @@ paths:
                   sla_deadline:
                     type: string
                     format: date-time
-                    example: "2026-08-01T15:30:00"
+                    example: "2026-08-01T15:30:00Z"
         "400":
           $ref: "#/components/responses/BledneDane"
         "401":
           $ref: "#/components/responses/BrakAutoryzacji"
         "403":
           $ref: "#/components/responses/BrakUprawnien"
+        "413":
+          $ref: "#/components/responses/ZaDuzeZadanie"
 
   # ---------------------------------------------------------------
   /tickets/{ticket_id}:
@@ -397,6 +408,11 @@ paths:
         Efekty uboczne: podjęcie zgłoszenia ze statusu `Nowe` przypisuje je
         do wywołującego, jeśli nie miało jeszcze opiekuna; przejście do
         `Zamkniete` ustawia `closed_at`.
+
+        Zmiana jest atomowa: błąd w dowolnym polu kończy się kodem 400 bez
+        zapisania pozostałych. Jeśli status zgłoszenia zmienił ktoś inny
+        między odczytem a zapisem (np. dwóch techników podejmuje je
+        jednocześnie), odpowiedzią jest 409 — należy odświeżyć zgłoszenie.
       requestBody:
         required: true
         content:
@@ -409,7 +425,9 @@ paths:
                 category: { $ref: "#/components/schemas/Kategoria" }
                 assigned_to:
                   type: integer
-                  description: Identyfikator technika (musi być liczbą całkowitą)
+                  description: |
+                    Identyfikator istniejącego użytkownika z rolą `technik`
+                    lub `admin` — inny identyfikator kończy się kodem 400.
                   example: 5
             examples:
               podjecie:
@@ -457,6 +475,15 @@ paths:
           $ref: "#/components/responses/BrakUprawnien"
         "404":
           $ref: "#/components/responses/NieZnaleziono"
+        "409":
+          description: Status zgłoszenia zmieniono w międzyczasie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Blad" }
+              example:
+                error: "Zgloszenie zostalo zmienione w miedzyczasie — odswiez je i sprobuj ponownie"
+        "413":
+          $ref: "#/components/responses/ZaDuzeZadanie"
 
   # ---------------------------------------------------------------
   /tickets/{ticket_id}/notes:
@@ -505,6 +532,8 @@ paths:
           $ref: "#/components/responses/BrakUprawnien"
         "404":
           $ref: "#/components/responses/NieZnaleziono"
+        "413":
+          $ref: "#/components/responses/ZaDuzeZadanie"
 
   # ---------------------------------------------------------------
   /tickets/{ticket_id}/audit:
@@ -532,6 +561,8 @@ paths:
           $ref: "#/components/responses/BrakAutoryzacji"
         "403":
           $ref: "#/components/responses/BrakUprawnien"
+        "404":
+          $ref: "#/components/responses/NieZnaleziono"
 
   # ---------------------------------------------------------------
   /ai/skutecznosc:
@@ -642,6 +673,8 @@ paths:
           $ref: "#/components/responses/BledneDane"
         "401":
           $ref: "#/components/responses/BrakAutoryzacji"
+        "413":
+          $ref: "#/components/responses/ZaDuzeZadanie"
 
 # ===============================================================
 components:
@@ -786,9 +819,9 @@ components:
           type: string
           format: date-time
           nullable: true
-          example: "2026-08-01T15:30:00"
-        created_at: { type: string, format: date-time, example: "2026-07-25T11:40:00" }
-        updated_at: { type: string, format: date-time, example: "2026-07-25T12:05:00" }
+          example: "2026-08-01T15:30:00Z"
+        created_at: { type: string, format: date-time, example: "2026-07-25T11:40:00Z" }
+        updated_at: { type: string, format: date-time, example: "2026-07-25T12:05:00Z" }
         closed_at:
           type: string
           format: date-time
@@ -883,6 +916,13 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Blad" }
           example: { error: "Nie znaleziono zgloszenia" }
+
+    ZaDuzeZadanie:
+      description: Ciało żądania przekracza 64 KB — odrzucone przed parsowaniem
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Blad" }
+          example: { error: "Zadanie jest za duze" }
 
     ZaWieleZadan:
       description: Przekroczono limit prób logowania (10/min, 30/h)

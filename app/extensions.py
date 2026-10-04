@@ -24,8 +24,8 @@ def klucz_logowania():
     celowo zablokowac dostep prawdziwym uzytkownikom. Spowolnienie daje ochrone
     przed zgadywaniem hasla, nie dajac narzedzia do odcinania ludzi od systemu.
     """
-    dane = request.get_json(silent=True) or {}
-    login = dane.get("username")
+    dane = request.get_json(silent=True)
+    login = dane.get("username") if isinstance(dane, dict) else None
     if not isinstance(login, str):
         login = ""
     return f"{get_remote_address()}|{login.lower()[:64]}"

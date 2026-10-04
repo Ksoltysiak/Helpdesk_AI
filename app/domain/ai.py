@@ -143,7 +143,7 @@ KEYWORDS = {
 # Zwroty świadczące o SKALI awarii — jedna osoba to nie to samo co cały dział.
 _ZWROTY_SKALI = (
     "caly dzial", "cala firma", "wszyscy", "nikt nie", "wszystkie stanowiska",
-    "cale biuro", "cały zespol", "caly zespol", "kilkanascie osob", "wiele osob",
+    "cale biuro", "caly zespol", "kilkanascie osob", "wiele osob",
 )
 
 # Zwroty świadczące o PILNOŚCI lub całkowitej niesprawności.

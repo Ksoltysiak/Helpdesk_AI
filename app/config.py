@@ -79,6 +79,12 @@ TITLE_MAX = 200
 DESC_MAX = 5000
 NOTE_MAX = 2000
 
+# Górny limit rozmiaru ciała żądania. Limity długości pól działają dopiero
+# po sparsowaniu JSON-a — bez tego klient mógłby przysłać wielomegabajtowe
+# ciało, które proces i tak wczyta w całości do pamięci. 64 KB mieści
+# najdłuższy poprawny opis nawet przy kodowaniu każdego znaku jako \uXXXX.
+MAX_ROZMIAR_ZADANIA = 64 * 1024
+
 # --- Stronicowanie -----------------------------------------------------
 # Bez górnego limitu pojedyncze żądanie może zmusić serwer do zbudowania
 # odpowiedzi o rozmiarze całej bazy.
