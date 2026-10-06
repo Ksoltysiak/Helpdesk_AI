@@ -13,13 +13,23 @@ from flask import g
 from app import config
 
 SCHEMA = """
+-- Firmy obslugiwane przez helpdesk. Pracownik zglaszajacy awarie nalezy do
+-- jednej z nich; technicy i administratorzy sa personelem helpdesku i nie
+-- maja klienta.
+CREATE TABLE IF NOT EXISTS clients (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT UNIQUE NOT NULL,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     username  TEXT UNIQUE NOT NULL,
     password  TEXT NOT NULL,
     name      TEXT NOT NULL,
     role      TEXT NOT NULL CHECK(role IN ('pracownik','technik','admin')),
-    email     TEXT
+    email     TEXT,
+    client_id INTEGER REFERENCES clients(id)
 );
 
 CREATE TABLE IF NOT EXISTS tickets (
@@ -36,7 +46,11 @@ CREATE TABLE IF NOT EXISTS tickets (
     sla_deadline    TEXT,
     created_at      TEXT DEFAULT (datetime('now')),
     updated_at      TEXT DEFAULT (datetime('now')),
-    closed_at       TEXT
+    closed_at       TEXT,
+    -- Klient zapisany w chwili utworzenia zgloszenia, a nie wyliczany z autora:
+    -- gdy pracownik zmieni firme, jego dawne zgloszenia nadal naleza do
+    -- poprzedniej — inaczej raporty dla klientow zmienialyby sie wstecz.
+    client_id       INTEGER REFERENCES clients(id)
 );
 
 CREATE TABLE IF NOT EXISTS notes (
@@ -73,6 +87,9 @@ CREATE INDEX IF NOT EXISTS idx_tickets_assigned_to ON tickets(assigned_to);
 CREATE INDEX IF NOT EXISTS idx_tickets_status_priority ON tickets(status, priority);
 CREATE INDEX IF NOT EXISTS idx_tickets_autor_id        ON tickets(created_by, id DESC);
 
+-- Lista zgloszen jednego klienta (filtr technika), sortowana jak kazda lista.
+CREATE INDEX IF NOT EXISTS idx_tickets_klient_id       ON tickets(client_id, id DESC);
+
 -- Pobieranie notatek i historii konkretnego zgloszenia.
 CREATE INDEX IF NOT EXISTS idx_notes_ticket     ON notes(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_audit_ticket     ON audit_log(ticket_id);
@@ -105,6 +122,17 @@ PRAGMA_TRWALA = ("journal_mode", "WAL")
 # istniejacej tabeli, wiec baze z wczesniejszej wersji trzeba uzupelnic wprost.
 MIGRACJE = (
     ("tickets", "ai_pewnosc", "REAL"),
+    ("users",   "client_id",  "INTEGER REFERENCES clients(id)"),
+    ("tickets", "client_id",  "INTEGER REFERENCES clients(id)"),
+)
+
+# Uzupelnienie danych po migracji. Zgloszenia sprzed wprowadzenia klientow
+# dziedzicza firme autora. Warunek `client_id IS NULL` sprawia, ze ponowne
+# uruchomienie niczego nie nadpisuje.
+UZUPELNIENIA = (
+    """UPDATE tickets SET client_id =
+           (SELECT client_id FROM users WHERE users.id = tickets.created_by)
+       WHERE client_id IS NULL""",
 )
 
 
@@ -182,6 +210,8 @@ def init_db():
     conn.execute(f"PRAGMA {nazwa} = {wartosc}")
     conn.executescript(SCHEMA)
     _domigruj(conn)
+    for zapytanie in UZUPELNIENIA:
+        conn.execute(zapytanie)
     conn.executescript(INDEKSY)
     conn.commit()
     conn.close()

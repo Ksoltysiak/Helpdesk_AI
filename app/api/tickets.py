@@ -58,8 +58,10 @@ def utworz():
     # UTC, jak wszystkie znaczniki czasu zapisywane przez SQLite. Czas lokalny
     # serwera rozjeżdżał się z `created_at` o przesunięcie strefy.
     deadline = teraz_utc(timedelta(hours=SLA_HOURS[wynik["priorytet"]]))
-    ticket_id = repo.utworz(title, description, g.user["id"], wynik["kategoria"],
-                            wynik["priorytet"], wynik["pewnosc"], deadline)
+    # Zgłoszenie należy do firmy autora z chwili utworzenia (opis w schemacie).
+    ticket_id = repo.utworz(title, description, g.user["id"], g.user["client_id"],
+                            wynik["kategoria"], wynik["priorytet"], wynik["pewnosc"],
+                            deadline)
 
     audit.zapisz(ticket_id, g.user["id"], "Utworzenie", None, reguly.STATUS_POCZATKOWY)
     # Wpis bez użytkownika — czynność wykonał moduł, nie człowiek.

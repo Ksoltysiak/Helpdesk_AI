@@ -113,6 +113,7 @@ def test_baza_ma_utworzone_indeksy(app):
     assert "idx_tickets_created_by" in indeksy
     assert "idx_tickets_status" in indeksy
     assert "idx_notes_ticket" in indeksy
+    assert "idx_tickets_klient_id" in indeksy
 
 
 def test_filtrowanie_korzysta_z_indeksu(app):
@@ -190,7 +191,13 @@ def test_migracja_dodaje_brakujaca_kolumne_do_istniejacej_bazy(tmp_path, monkeyp
     conn.close()
 
     assert "ai_pewnosc" in kolumny_po, "Migracja nie dodala kolumny"
+    assert "client_id" in kolumny_po, "Migracja nie dodala klienta do zgloszen"
     assert zachowane == 1, "Migracja nie moze kasowac istniejacych danych"
+
+    conn = sqlite3.connect(stara)
+    assert "client_id" in {w[1] for w in conn.execute("PRAGMA table_info(users)")}
+    assert conn.execute("SELECT COUNT(*) FROM clients").fetchone()[0] == 0
+    conn.close()
 
 
 def test_baza_dziala_w_trybie_wal(app):

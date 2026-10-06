@@ -26,6 +26,21 @@ def _hash_zastepczy():
     return generate_password_hash("konto-nie-istnieje")
 
 
+def _tozsamosc(user):
+    """Dane, które interfejs pokazuje o zalogowanej osobie.
+
+    Klient (firma) jest pusty dla personelu helpdesku — technik i administrator
+    obsługują wszystkie firmy.
+    """
+    return {
+        "id":          user["id"],
+        "name":        user["name"],
+        "role":        user["role"],
+        "client_id":   user["client_id"],
+        "client_name": user["client_name"],
+    }
+
+
 @bp.route("/auth/login", methods=["POST"])
 @limiter.limit("10 per minute; 30 per hour")                            # na adres IP
 @limiter.limit("5 per minute; 20 per hour", key_func=klucz_logowania)   # na konto
@@ -44,12 +59,7 @@ def login():
     if not check_password_hash(hash_hasla, password) or not user:
         return jsonify({"error": "Nieprawidlowy login lub haslo"}), 401
 
-    return jsonify({
-        "id":    user["id"],
-        "name":  user["name"],
-        "role":  user["role"],
-        "token": generate_token(user["id"]),
-    })
+    return jsonify({**_tozsamosc(user), "token": generate_token(user["id"])})
 
 
 @bp.route("/auth/me", methods=["GET"])
@@ -60,4 +70,4 @@ def me():
     Interfejs weryfikuje token tutaj, zamiast ufać danym zapisanym
     w przeglądarce.
     """
-    return jsonify({"id": g.user["id"], "name": g.user["name"], "role": g.user["role"]})
+    return jsonify(_tozsamosc(g.user))

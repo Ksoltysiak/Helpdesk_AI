@@ -15,7 +15,7 @@ priorytetu zgłoszenia
   statusy aż do zamknięcia. Każda zmiana jest zapisywana w historii.
 - Ocena zgłoszeń: **94,4% trafności** na zbiorze kontrolnym, **5 z 5**
   incydentów bezpieczeństwa rozpoznanych jako krytyczne.
-- Jakość: **416 testów automatycznych**, 100% pokrycia kodu, cały system
+- Jakość: **440 testów automatycznych**, 100% pokrycia kodu, cały system
   uruchamiany jednym poleceniem (Docker).
 
 ## Spis treści
@@ -67,12 +67,16 @@ zespołowego.
                          └─────────────────────────────────────────────┘
 ```
 
-### Role
+### Klienci i role
+
+Helpdesk obsługuje kilka **firm-klientów**. Każdy pracownik należy do jednej
+z nich, a zgłoszenie zapamiętuje firmę autora w chwili utworzenia — dzięki
+temu można później przygotować zestawienie dla konkretnego klienta.
 
 | Rola | Co może |
 |------|---------|
-| **Pracownik** | Zakłada zgłoszenia; widzi **wyłącznie własne** zgłoszenia i komentarze oznaczone jako jawne |
-| **Technik** | Widzi i filtruje wszystkie zgłoszenia; zmienia status, kategorię i przypisanie; dodaje komentarze (wewnętrzne lub jawne); przegląda historię zmian |
+| **Pracownik** (firmy-klienta) | Zakłada zgłoszenia; widzi **wyłącznie własne** zgłoszenia i komentarze oznaczone jako jawne |
+| **Technik** (helpdesk) | Widzi i filtruje wszystkie zgłoszenia, także według klienta; przegląda listę klientów; zmienia status, kategorię i przypisanie; dodaje komentarze (wewnętrzne lub jawne); przegląda historię zmian |
 | **Administrator** | Uprawnienia technika |
 
 ### Cykl życia zgłoszenia
@@ -203,7 +207,7 @@ Pełny audyt (20 punktów kontrolnych): [`SECURITY.md`](SECURITY.md).
 
 | Rodzaj testów | Liczba | Co sprawdzają |
 |---------------|--------|---------------|
-| Jednostkowe i integracyjne | 395 | Moduł AI, cykl życia, API, uprawnienia, walidację danych |
+| Jednostkowe i integracyjne | 419 | Moduł AI, cykl życia, API, uprawnienia, klientów, walidację danych |
 | Kompletny przepływ (E2E) | 21 | Działający serwer — od logowania do zamknięcia zgłoszenia |
 
 - **Pokrycie kodu: 100%.**
@@ -232,9 +236,12 @@ Konta demonstracyjne:
 
 | Login | Hasło | Rola |
 |-------|-------|------|
-| `k.nowak` | `haslo123` | pracownik |
+| `k.nowak` | `haslo123` | pracownik (Piekarnia Złoty Kłos) |
 | `m.lewandowski` | `tech123` | technik |
 | `admin` | `admin123` | administrator |
+
+Dane demonstracyjne zawierają 5 fikcyjnych firm; pełna lista kont:
+[`README.md`](README.md#dane-testowe-logowanie).
 
 Interaktywna dokumentacja API: `http://localhost:8080/api/docs`.
 Testy: `py -m pytest`. Konfiguracja i rozwiązywanie problemów:
@@ -251,7 +258,7 @@ Testy: `py -m pytest`. Konfiguracja i rozwiązywanie problemów:
 | Ocena zgłoszeń | 94,4% trafności na zbiorze kontrolnym; 5/5 incydentów bezpieczeństwa rozpoznanych |
 | Wydajność | Lista zgłoszeń 51× szybsza, odpowiedź 399× mniejsza |
 | Bezpieczeństwo | Audyt 20-punktowy; usunięto m.in. możliwość podszycia się i 15 podatności |
-| Jakość | 416 testów automatycznych, 100% pokrycia kodu |
+| Jakość | 440 testów automatycznych, 100% pokrycia kodu |
 | Wdrożenie | Cały system uruchamiany jednym poleceniem, sprawdzany w CI |
 
 ### Ograniczenia
@@ -267,11 +274,14 @@ Testy: `py -m pytest`. Konfiguracja i rozwiązywanie problemów:
 
 ### Dalszy rozwój
 
-1. Powiadomienia (e-mail, komunikator) o zbliżającym się i przekroczonym
+1. **Raporty dla klientów** z wykresami — które kategorie awarii powtarzają
+   się najczęściej i jak zmieniają się w czasie. Podstawa jest gotowa:
+   każde zgłoszenie jest przypisane do firmy.
+2. Powiadomienia (e-mail, komunikator) o zbliżającym się i przekroczonym
    terminie SLA.
-2. Ocena zgłoszeń z pomocą modelu językowego, z powrotem do obecnego modułu
+3. Ocena zgłoszeń z pomocą modelu językowego, z powrotem do obecnego modułu
    w razie awarii usługi.
-3. Przejście na PostgreSQL przy większej skali.
+4. Przejście na PostgreSQL przy większej skali.
 
 ---
 

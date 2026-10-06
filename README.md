@@ -302,9 +302,20 @@ szczegółowe wyniki w pliku **[PERFORMANCE.md](PERFORMANCE.md)**.
 
 | Rola        | Uprawnienia                                                           |
 |-------------|------------------------------------------------------------------------|
-| `pracownik` | Tworzenie zgłoszeń, podgląd **wyłącznie własnych** zgłoszeń            |
-| `technik`   | Podgląd wszystkich zgłoszeń, zmiana statusu/kategorii, notatki, audyt  |
+| `pracownik` | Pracownik firmy-klienta: tworzenie zgłoszeń, podgląd **wyłącznie własnych** |
+| `technik`   | Podgląd wszystkich zgłoszeń i klientów, zmiana statusu/kategorii, notatki, audyt |
 | `admin`     | Pełny dostęp                                                           |
+
+---
+
+### Klienci
+
+Helpdesk obsługuje kilka firm (tabela `clients`). Każdy pracownik należy do
+jednej z nich, a zgłoszenie zapamiętuje firmę autora **w chwili utworzenia** —
+gdy pracownik zmieni pracodawcę, jego dawne zgłoszenia zostają przy
+poprzedniej firmie. Technik widzi listę klientów (`GET /api/clients`)
+i filtruje zgłoszenia parametrem `client_id`; pracownik nie ma dostępu do
+danych innych firm.
 
 ---
 
@@ -332,6 +343,7 @@ orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
 | PATCH  | `/api/tickets/{id}`        | technik/admin | Zmiana statusu / kategorii / przypisania    |
 | POST   | `/api/tickets/{id}/notes`  | technik/admin | Notatka (wewnętrzna lub widoczna)           |
 | GET    | `/api/tickets/{id}/audit`  | technik/admin | Pełna ścieżka audytu                        |
+| GET    | `/api/clients`             | technik/admin | Klienci z liczbą pracowników i zgłoszeń     |
 | GET    | `/api/ai/skutecznosc`      | technik/admin | Skuteczność AI liczona z korekt techników   |
 | POST   | `/api/ai/categorize`       | każdy         | Test modułu AI na dowolnym tekście          |
 
@@ -390,14 +402,18 @@ korekt techników i wskazuje, które kategorie mylą się najczęściej.
 Dostępne po uruchomieniu `seed.py`. Hasła są hashowane — poniżej podane są
 oryginalne wartości do zalogowania się przez interfejs.
 
-| Login          | Hasło    | Rola      |
-|-----------------|----------|-----------|
-| k.nowak         | haslo123 | pracownik |
-| p.wisniewski    | haslo123 | pracownik |
-| a.kowalczyk     | haslo123 | pracownik |
-| m.lewandowski   | tech123  | technik   |
-| j.zielinska     | tech123  | technik   |
-| admin           | admin123 | admin     |
+Firmy i nazwiska są fikcyjne.
+
+| Login          | Hasło    | Rola      | Klient                          |
+|-----------------|----------|-----------|---------------------------------|
+| k.nowak         | haslo123 | pracownik | Piekarnia Złoty Kłos            |
+| p.wisniewski    | haslo123 | pracownik | Biuro Rachunkowe Bilans         |
+| a.kowalczyk     | haslo123 | pracownik | Kancelaria Prawna Paragraf      |
+| e.kaminska      | haslo123 | pracownik | Hurtownia Budowlana Cegiełka    |
+| r.wojcik        | haslo123 | pracownik | Klinika Weterynaryjna Pazurek   |
+| m.lewandowski   | tech123  | technik   | — (personel helpdesku)          |
+| j.zielinska     | tech123  | technik   | — (personel helpdesku)          |
+| admin           | admin123 | admin     | — (personel helpdesku)          |
 
 ---
 

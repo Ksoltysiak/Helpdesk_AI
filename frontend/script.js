@@ -8,9 +8,12 @@ let state = {
   token:  null,
   user:   null,
   role:   null,
+  clientName: null,     // firma pracownika; null dla technika i administratora
   currentView: 'dashboard',
   filterStatus: '',
   filterPriority: '',
+  filterClient: '',
+  klienci: null,        // lista klientów do filtra — pobierana raz na sesję
   page: 1,
 };
 
@@ -71,6 +74,7 @@ async function doLogin() {
     state.token  = data.token;
     state.user   = data.name;
     state.role   = data.role;
+    state.clientName = data.client_name;
     sessionStorage.setItem('helpdesk_token', data.token);
 
     document.getElementById('loginScreen').style.display = 'none';
@@ -94,7 +98,8 @@ function showLoginError(msg) {
 
 function doLogout() {
   state.userId = null; state.token = null; state.user = null; state.role = null;
-  state.filterStatus = ''; state.filterPriority = ''; state.page = 1;
+  state.clientName = null; state.klienci = null;
+  state.filterStatus = ''; state.filterPriority = ''; state.filterClient = ''; state.page = 1;
   sessionStorage.removeItem('helpdesk_token');
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('app').classList.remove('visible');
@@ -114,7 +119,8 @@ function setupSidebar() {
 
   const isTechnik = state.role === 'technik' || state.role === 'admin';
   document.getElementById('userRoleSidebar').textContent =
-    state.role === 'admin' ? 'Administrator' : isTechnik ? 'Technik IT' : 'Pracownik';
+    state.role === 'admin' ? 'Administrator' : isTechnik ? 'Technik IT'
+    : state.clientName ? `Pracownik · ${state.clientName}` : 'Pracownik';
   document.getElementById('sidebarRoleLabel').textContent =
     isTechnik ? 'Konsola IT' : 'Portal Pracownika';
 
@@ -142,6 +148,10 @@ function setupSidebar() {
       <a class="nav-item" data-view="all-tickets" onclick="navigate('all-tickets')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
         Wszystkie zgłoszenia
+      </a>
+      <a class="nav-item" data-view="clients" onclick="navigate('clients')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h1M14 9h1M9 13h1M14 13h1M9 17h1M14 17h1"/></svg>
+        Klienci
       </a>`;
   }
 
@@ -163,6 +173,7 @@ function navigate(view) {
     'new-ticket':  'Nowe zgłoszenie',
     'my-tickets':  'Moje zgłoszenia',
     'all-tickets': 'Wszystkie zgłoszenia',
+    'clients':     'Klienci',
   };
   document.getElementById('pageTitle').textContent = titles[view] || 'HelpDesk IT';
   renderView(view);
@@ -176,6 +187,7 @@ function renderView(view) {
     case 'new-ticket':  c.innerHTML = renderNewTicket(); break;
     case 'my-tickets':  renderMyTickets(); break;
     case 'all-tickets': renderAllTickets(); break;
+    case 'clients':     renderClients(); break;
     default:            renderDashboard();
   }
 }
@@ -283,7 +295,7 @@ async function renderDashboard() {
       c.innerHTML = `
         <div style="margin-bottom:1.5rem">
           <h2 style="font-size:var(--text-lg);font-weight:700;margin-bottom:0.25rem">Witaj, ${escHtml(state.user.split(' ')[0])}! 👋</h2>
-          <p style="color:var(--color-text-muted);font-size:var(--text-sm)">Zarządzaj swoimi zgłoszeniami IT</p>
+          <p style="color:var(--color-text-muted);font-size:var(--text-sm)">${state.clientName ? escHtml(state.clientName) + ' · ' : ''}Zarządzaj swoimi zgłoszeniami IT</p>
         </div>
         <div class="kpi-grid">
           <div class="card kpi-card">
@@ -359,7 +371,8 @@ async function renderAllTickets() {
     let url = `/tickets?page=${state.page}`;
     if (state.filterStatus)   url += `&status=${encodeURIComponent(state.filterStatus)}`;
     if (state.filterPriority) url += `&priority=${encodeURIComponent(state.filterPriority)}`;
-    const data = await apiFetch(url);
+    if (state.filterClient)   url += `&client_id=${encodeURIComponent(state.filterClient)}`;
+    const [data, klienci] = await Promise.all([apiFetch(url), pobierzKlientow()]);
 
     c.innerHTML = `
       <div class="card">
@@ -382,6 +395,10 @@ async function renderAllTickets() {
             <option value="Sredni"    ${state.filterPriority==='Sredni'   ?'selected':''}>Średni</option>
             <option value="Niski"     ${state.filterPriority==='Niski'    ?'selected':''}>Niski</option>
           </select>
+          <select class="filter-select" onchange="state.filterClient=this.value;state.page=1;renderView('all-tickets')">
+            <option value="">Wszyscy klienci</option>
+            ${klienci.map(k => `<option value="${k.id}" ${String(k.id)===String(state.filterClient)?'selected':''}>${escHtml(k.name)}</option>`).join('')}
+          </select>
         </div>
         ${data.tickets.length
           ? renderTicketTable(data.tickets, true) + renderPaginacja(data)
@@ -390,6 +407,56 @@ async function renderAllTickets() {
   } catch (e) {
     c.innerHTML = errorCard(e.message);
   }
+}
+
+// ============================================================
+// CLIENTS (technik/admin)
+// ============================================================
+// Lista klientów zmienia się rzadko, a filtr potrzebuje jej przy każdym
+// przełączeniu strony listy — pobieramy ją raz i trzymamy w stanie.
+async function pobierzKlientow(odswiez = false) {
+  if (!state.klienci || odswiez) state.klienci = await apiFetch('/clients');
+  return state.klienci;
+}
+
+async function renderClients() {
+  const c = document.getElementById('mainContent');
+  try {
+    // Widok klientów pokazuje liczniki — zawsze aktualne, nie z pamięci.
+    const klienci = await pobierzKlientow(true);
+    const rows = klienci.map(k => `
+      <tr onclick="pokazZgloszeniaKlienta(${k.id})" style="cursor:pointer" title="Pokaż zgłoszenia klienta">
+        <td style="font-weight:500">${escHtml(k.name)}</td>
+        <td class="td-muted">${k.pracownikow}</td>
+        <td>${k.zgloszen}</td>
+        <td>${k.otwartych
+          ? `<span class="badge badge-wrealizacji">${k.otwartych}</span>`
+          : '<span class="td-muted">0</span>'}</td>
+      </tr>`).join('');
+
+    c.innerHTML = `
+      <div class="card">
+        <div class="section-header">
+          <div class="section-title">Klienci <span style="color:var(--color-text-muted);font-weight:400;font-size:var(--text-sm)">(${klienci.length})</span></div>
+        </div>
+        ${klienci.length ? `
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Firma</th><th>Pracownicy</th><th>Zgłoszenia</th><th>Otwarte</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>` : emptyState('Brak klientów w systemie.')}
+      </div>`;
+  } catch (e) {
+    c.innerHTML = errorCard(e.message);
+  }
+}
+
+function pokazZgloszeniaKlienta(id) {
+  state.filterClient = String(id);
+  state.filterStatus = '';
+  state.filterPriority = '';
+  navigate('all-tickets');
 }
 
 // ============================================================
@@ -433,7 +500,10 @@ function renderTicketTable(tickets, showAuthor) {
       </td>
       <td>${priorityBadge(t.priority)}</td>
       <td>${statusBadge(t.status)}</td>
-      ${showAuthor ? `<td class="td-muted">${escHtml(t.created_by_name || '#' + t.created_by)}</td>` : ''}
+      ${showAuthor ? `<td class="td-muted">
+        ${escHtml(t.created_by_name || '#' + t.created_by)}
+        ${t.client_name ? `<div style="font-size:var(--text-xs)">${escHtml(t.client_name)}</div>` : ''}
+      </td>` : ''}
       <td class="td-muted">${formatDate(t.created_at)}</td>
     </tr>`).join('');
 
@@ -521,6 +591,10 @@ async function openTicket(id) {
           <div class="info-item">
             <div class="info-item-label">Zgłaszający</div>
             <div style="font-size:var(--text-sm)">${escHtml(t.created_by_name || '#' + t.created_by)}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-item-label">Klient</div>
+            <div style="font-size:var(--text-sm)">${escHtml(t.client_name || '—')}</div>
           </div>
           <div class="info-item">
             <div class="info-item-label">Przypisano do</div>
@@ -739,6 +813,7 @@ async function restoreSession() {
     state.userId = data.id;
     state.user   = data.name;
     state.role   = data.role;
+    state.clientName = data.client_name;
 
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').classList.add('visible');

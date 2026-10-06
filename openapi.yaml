@@ -55,6 +55,8 @@ tags:
     description: Logowanie i odtwarzanie sesji
   - name: Zgłoszenia
     description: Cykl życia zgłoszenia IT
+  - name: Klienci
+    description: Firmy obsługiwane przez helpdesk
   - name: Notatki i audyt
     description: Notatki techników i historia zmian
   - name: Pulpit i AI
@@ -139,11 +141,20 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [id, name, role, token]
+                required: [id, name, role, client_id, client_name, token]
                 properties:
                   id: { type: integer, example: 4 }
                   name: { type: string, example: Marek Lewandowski }
                   role: { $ref: "#/components/schemas/Rola" }
+                  client_id:
+                    type: integer
+                    nullable: true
+                    description: Firma zalogowanej osoby; `null` dla technika i administratora
+                    example: 1
+                  client_name:
+                    type: string
+                    nullable: true
+                    example: Piekarnia Złoty Kłos
                   token:
                     type: string
                     description: Token JWT do nagłówka Authorization
@@ -171,11 +182,20 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [id, name, role]
+                required: [id, name, role, client_id, client_name]
                 properties:
                   id: { type: integer, example: 1 }
                   name: { type: string, example: Katarzyna Nowak }
                   role: { $ref: "#/components/schemas/Rola" }
+                  client_id:
+                    type: integer
+                    nullable: true
+                    description: Firma zalogowanej osoby; `null` dla technika i administratora
+                    example: 1
+                  client_name:
+                    type: string
+                    nullable: true
+                    example: Piekarnia Złoty Kłos
         "401":
           $ref: "#/components/responses/BrakAutoryzacji"
 
@@ -264,6 +284,10 @@ paths:
           in: query
           description: Tylko technik/admin
           schema: { $ref: "#/components/schemas/Kategoria" }
+        - name: client_id
+          in: query
+          description: Tylko technik/admin — zgłoszenia jednego klienta
+          schema: { type: integer, example: 2 }
         - name: page
           in: query
           description: Numer strony, liczony od 1
@@ -565,6 +589,30 @@ paths:
           $ref: "#/components/responses/NieZnaleziono"
 
   # ---------------------------------------------------------------
+  /clients:
+    get:
+      tags: [Klienci]
+      summary: Lista klientów
+      description: |
+        Firmy obsługiwane przez helpdesk wraz z liczbą pracowników oraz
+        wszystkich i otwartych zgłoszeń, posortowane alfabetycznie.
+
+        Wymaga roli `technik` lub `admin` — pracownik jednej firmy nie poznaje
+        nazw ani skali zgłoszeń innych klientów.
+      responses:
+        "200":
+          description: Lista klientów
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Klient" }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+
+  # ---------------------------------------------------------------
   /ai/skutecznosc:
     get:
       tags: [Pulpit i AI]
@@ -751,6 +799,25 @@ components:
           items: { type: string }
           example: ["vpn", "polaczen"]
 
+    Klient:
+      type: object
+      required: [id, name, pracownikow, zgloszen, otwartych]
+      properties:
+        id: { type: integer, example: 2 }
+        name: { type: string, example: Biuro Rachunkowe Bilans }
+        pracownikow:
+          type: integer
+          description: Liczba kont pracowników tej firmy
+          example: 1
+        zgloszen:
+          type: integer
+          description: Wszystkie zgłoszenia klienta
+          example: 6
+        otwartych:
+          type: integer
+          description: Zgłoszenia o statusie innym niż `Zamkniete`
+          example: 4
+
     Zgloszenie:
       type: object
       required:
@@ -770,6 +837,8 @@ components:
         - closed_at
         - created_by_name
         - assigned_to_name
+        - client_id
+        - client_name
       properties:
         id: { type: integer, example: 12 }
         title: { type: string, example: Nie dziala VPN }
@@ -800,6 +869,18 @@ components:
           nullable: true
           description: Imię i nazwisko przypisanego technika
           example: Marek Lewandowski
+        client_id:
+          type: integer
+          nullable: true
+          description: |
+            Klient (firma) zgłaszającego w chwili utworzenia zgłoszenia.
+            Nie zmienia się, gdy pracownik przejdzie później do innej firmy.
+          example: 2
+        client_name:
+          type: string
+          nullable: true
+          description: Nazwa klienta (dołączana przez serwer)
+          example: Biuro Rachunkowe Bilans
         ai_categorized:
           type: boolean
           description: Czy kategorię nadał moduł AI
