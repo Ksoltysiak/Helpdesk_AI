@@ -13,9 +13,12 @@ priorytetu zgłoszenia
   zgłoszenie**: nadaje kategorię, priorytet i termin realizacji (SLA).
 - Technik podejmuje zgłoszenie, dodaje komentarze i prowadzi je przez kolejne
   statusy aż do zamknięcia. Każda zmiana jest zapisywana w historii.
+- Dla każdej firmy-klienta system tworzy **raport z wykresami**: co psuje się
+  najczęściej, jak szybko i czy w terminie rozwiązywano zgłoszenia, wraz
+  z rekomendacjami.
 - Ocena zgłoszeń: **94,4% trafności** na zbiorze kontrolnym, **5 z 5**
   incydentów bezpieczeństwa rozpoznanych jako krytyczne.
-- Jakość: **440 testów automatycznych**, 100% pokrycia kodu, cały system
+- Jakość: **543 testy automatyczne**, 100% pokrycia kodu, cały system
   uruchamiany jednym poleceniem (Docker).
 
 ## Spis treści
@@ -76,8 +79,26 @@ temu można później przygotować zestawienie dla konkretnego klienta.
 | Rola | Co może |
 |------|---------|
 | **Pracownik** (firmy-klienta) | Zakłada zgłoszenia; widzi **wyłącznie własne** zgłoszenia i komentarze oznaczone jako jawne |
-| **Technik** (helpdesk) | Widzi i filtruje wszystkie zgłoszenia, także według klienta; przegląda listę klientów; zmienia status, kategorię i przypisanie; dodaje komentarze (wewnętrzne lub jawne); przegląda historię zmian |
+| **Technik** (helpdesk) | Widzi i filtruje wszystkie zgłoszenia, także według klienta; przegląda listę klientów i tworzy dla nich raporty; zmienia status, kategorię i przypisanie; dodaje komentarze (wewnętrzne lub jawne); przegląda historię zmian |
 | **Administrator** | Uprawnienia technika |
+
+### Raporty dla klientów
+
+Technik wybiera firmę i okres (np. ostatnie 30 dni, 12 miesięcy lub własny
+zakres), a system przygotowuje raport:
+
+| Część raportu | Co pokazuje |
+|---|---|
+| Podsumowanie | Liczba zgłoszeń (ze zmianą względem poprzedniego okresu), odsetek rozwiązanych, średni czas rozwiązania, odsetek rozwiązanych w terminie SLA |
+| Wykres kategorii | Czego dotyczyły zgłoszenia — z zaznaczoną wartością z poprzedniego okresu |
+| Wykres priorytetów i trend | Jak poważne były problemy i jak ich liczba zmieniała się w czasie |
+| Najczęstsze problemy | Słowa kluczowe rozpoznane przez moduł AI, np. „router" (5 zgłoszeń) — dokładniej niż sama kategoria |
+| Rekomendacje | Do pięciu wniosków wynikających wprost z liczb, np. *„W terminie SLA rozwiązano 36% zgłoszeń — poniżej oczekiwanych 80%"* |
+
+Raport można wydrukować lub zapisać jako PDF. Każda liczba ma ścisłą
+definicję (np. zgłoszenie otwarte ponownie liczy się od drugiego
+rozwiązania), a poprawność obliczeń sprawdzają testy na ręcznie policzonych
+danych.
 
 ### Cykl życia zgłoszenia
 
@@ -207,8 +228,8 @@ Pełny audyt (20 punktów kontrolnych): [`SECURITY.md`](SECURITY.md).
 
 | Rodzaj testów | Liczba | Co sprawdzają |
 |---------------|--------|---------------|
-| Jednostkowe i integracyjne | 419 | Moduł AI, cykl życia, API, uprawnienia, klientów, walidację danych |
-| Kompletny przepływ (E2E) | 21 | Działający serwer — od logowania do zamknięcia zgłoszenia |
+| Jednostkowe i integracyjne | 518 | Moduł AI, cykl życia, API, uprawnienia, klientów, raporty, walidację danych |
+| Kompletny przepływ (E2E) | 25 | Działający serwer — od logowania do zamknięcia zgłoszenia i raportu |
 
 - **Pokrycie kodu: 100%.**
 - Skuteczność samych testów potwierdzono **testowaniem mutacyjnym** — celowo
@@ -219,6 +240,11 @@ Pełny audyt (20 punktów kontrolnych): [`SECURITY.md`](SECURITY.md).
 **Wydajność** zmierzono na bazie z 20 000 zgłoszeń. Po wprowadzeniu
 stronicowania i indeksów lista zgłoszeń działa **51 razy szybciej**
 (251 ms → 5 ms), a odpowiedź jest **399 razy mniejsza** (9 MB → 23 KB).
+
+**Raporty** przeszły test obciążeniowy na bazie ze **100 000 zgłoszeń**:
+raport klienta powstaje w ok. 5–20 ms, 2000 losowych błędnych zapytań nie
+wywołało żadnego błędu serwera, a 600 równoległych zapytań przeszło bez
+błędów i ze zgodnymi wynikami.
 
 Szczegóły: [`TESTING.md`](TESTING.md), [`PERFORMANCE.md`](PERFORMANCE.md).
 
@@ -258,7 +284,8 @@ Testy: `py -m pytest`. Konfiguracja i rozwiązywanie problemów:
 | Ocena zgłoszeń | 94,4% trafności na zbiorze kontrolnym; 5/5 incydentów bezpieczeństwa rozpoznanych |
 | Wydajność | Lista zgłoszeń 51× szybsza, odpowiedź 399× mniejsza |
 | Bezpieczeństwo | Audyt 20-punktowy; usunięto m.in. możliwość podszycia się i 15 podatności |
-| Jakość | 440 testów automatycznych, 100% pokrycia kodu |
+| Raporty | Raport klienta w 5–20 ms przy 100 000 zgłoszeń; 0 błędów w testach losowych i równoległych |
+| Jakość | 543 testy automatyczne, 100% pokrycia kodu |
 | Wdrożenie | Cały system uruchamiany jednym poleceniem, sprawdzany w CI |
 
 ### Ograniczenia
@@ -274,11 +301,10 @@ Testy: `py -m pytest`. Konfiguracja i rozwiązywanie problemów:
 
 ### Dalszy rozwój
 
-1. **Raporty dla klientów** z wykresami — które kategorie awarii powtarzają
-   się najczęściej i jak zmieniają się w czasie. Podstawa jest gotowa:
-   każde zgłoszenie jest przypisane do firmy.
+1. Rola kierownika zespołu — nadzór nad technikami i ustawienia (np. czasy
+   SLA), z dostępem do raportów.
 2. Powiadomienia (e-mail, komunikator) o zbliżającym się i przekroczonym
-   terminie SLA.
+   terminie SLA oraz comiesięczna wysyłka raportu do klienta.
 3. Ocena zgłoszeń z pomocą modelu językowego, z powrotem do obecnego modułu
    w razie awarii usługi.
 4. Przejście na PostgreSQL przy większej skali.

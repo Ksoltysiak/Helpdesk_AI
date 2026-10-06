@@ -24,3 +24,10 @@ def lista():
          "zgloszen": r["zgloszen"], "otwartych": r["otwartych"]}
         for r in rows
     ]
+
+
+def po_id(client_id):
+    """Klient o podanym identyfikatorze albo None."""
+    return get_db().execute(
+        "SELECT id, name FROM clients WHERE id = ?", (client_id,)
+    ).fetchone()

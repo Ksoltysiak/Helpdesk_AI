@@ -240,6 +240,18 @@ def test_schemat_wyniku_ai_odpowiada_odpowiedzi(client, pracownik, spec):
     assert set(wynik) == _wlasciwosci(spec, "WynikAI")
 
 
+def test_schemat_raportu_odpowiada_odpowiedzi(client, technik, spec):
+    """Kazdy poziom zagniezdzenia raportu ma te same pola co specyfikacja."""
+    raport = client.get("/api/reports?client_id=1", headers=technik).get_json()
+    schemat = spec["components"]["schemas"]["Raport"]
+    assert set(raport) == set(schemat["properties"]) == set(schemat["required"])
+    for pole in ("klient", "okres", "podsumowanie", "poprzedni_okres"):
+        assert set(raport[pole]) == set(schemat["properties"][pole]["properties"]), pole
+    for pole in ("wg_kategorii", "wg_priorytetu", "trend", "najczestsze_problemy"):
+        if raport[pole]:
+            assert set(raport[pole][0]) == set(schemat["properties"][pole]["items"]["properties"]), pole
+
+
 def test_schemat_logowania_odpowiada_odpowiedzi(client, spec):
     dane = client.post("/api/auth/login",
                        json={"username": "k.nowak", "password": "haslo123"}).get_json()

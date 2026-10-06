@@ -167,8 +167,8 @@ py wsgi.py                    # startuje serwer na http://127.0.0.1:5000
 
 ## Testy
 
-Projekt ma zestaw **296 automatycznych sprawdzeń** w trzech warstwach
-(275 testów `pytest` + 21 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
+Projekt ma zestaw **543 automatycznych sprawdzeń** w trzech warstwach
+(518 testów `pytest` + 25 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
 
 ```bash
 py -m pip install -r requirements-dev.txt
@@ -177,9 +177,9 @@ py -m pytest
 
 | Warstwa | Liczba | Zakres |
 |---|---|---|
-| Jednostkowe | 85 | Kategoryzacja AI i jej skuteczność, tokeny JWT, maszyna stanów |
-| Integracyjne | 252 | Flask + baza: RBAC, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
-| E2E (`demo.py`) | 21 | Pełny przepływ przez działający serwer |
+| Jednostkowe | 142 | Kategoryzacja AI i jej skuteczność, reguły raportów, tokeny JWT, maszyna stanów |
+| Integracyjne | 376 | Flask + baza: RBAC, klienci, raporty, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
+| E2E (`demo.py`) | 25 | Pełny przepływ przez działający serwer |
 
 Testy uruchamiają się automatycznie przy każdym pull requeście
 (`.github/workflows/tests.yml`).
@@ -194,8 +194,9 @@ pomiary wydajności: **[PERFORMANCE.md](PERFORMANCE.md)**.
 ## Weryfikacja działania
 
 Gdy serwer działa, skrypt `demo.py` sprawdza wszystkie operacje API — logowanie
-JWT, kategoryzację AI, przejścia statusów, ścieżkę audytu oraz testy negatywne
-(brak tokenu, podrobiony token, przekroczone limity długości, nieznany endpoint):
+JWT, kategoryzację AI, przejścia statusów, ścieżkę audytu, klientów i raporty
+oraz testy negatywne (brak tokenu, podrobiony token, przekroczone limity
+długości, nieznany endpoint, brak uprawnień do raportów):
 
 ```bash
 BASE_URL=http://localhost:8080 py demo.py
@@ -204,7 +205,7 @@ BASE_URL=http://localhost:8080 py demo.py
 Oczekiwany wynik:
 
 ```
-WYNIK: 21 testow OK, 0 bledow
+WYNIK: 25 testow OK, 0 bledow
 ```
 
 Ręczne sprawdzenie endpointów (wymaga najpierw zalogowania się i pobrania tokenu):
@@ -317,6 +318,24 @@ poprzedniej firmie. Technik widzi listę klientów (`GET /api/clients`)
 i filtruje zgłoszenia parametrem `client_id`; pracownik nie ma dostępu do
 danych innych firm.
 
+### Raporty dla klientów
+
+Technik generuje raport dla wybranej firmy (albo wszystkich) za dowolny okres
+do 366 dni — w interfejsie „Raporty" lub przez `GET /api/reports`. Raport
+zawiera:
+
+- podsumowanie: liczbę zgłoszeń, odsetek rozwiązanych, średni czas
+  rozwiązania i odsetek rozwiązanych w terminie SLA,
+- porównanie z poprzednim okresem tej samej długości,
+- wykresy: kategorie (z wartością z poprzedniego okresu), priorytety i trend,
+- najczęstsze problemy — według słów kluczowych rozpoznanych przez moduł AI,
+- do pięciu rekomendacji wyprowadzonych wprost z liczb w raporcie.
+
+Przycisk „Drukuj / PDF" drukuje sam raport (bez menu), zawsze w jasnym
+motywie — w oknie drukowania można wybrać zapis do pliku PDF. Definicje miar
+i wyniki testu obciążeniowego: `openapi.yaml` (`/reports`) oraz
+[PERFORMANCE.md](PERFORMANCE.md#raporty-dla-klientów--test-obciążeniowy).
+
 ---
 
 ## Punkty końcowe API
@@ -344,6 +363,7 @@ orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
 | POST   | `/api/tickets/{id}/notes`  | technik/admin | Notatka (wewnętrzna lub widoczna)           |
 | GET    | `/api/tickets/{id}/audit`  | technik/admin | Pełna ścieżka audytu                        |
 | GET    | `/api/clients`             | technik/admin | Klienci z liczbą pracowników i zgłoszeń     |
+| GET    | `/api/reports`             | technik/admin | Raport klienta: kategorie, trend, SLA, rekomendacje |
 | GET    | `/api/ai/skutecznosc`      | technik/admin | Skuteczność AI liczona z korekt techników   |
 | POST   | `/api/ai/categorize`       | każdy         | Test modułu AI na dowolnym tekście          |
 

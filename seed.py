@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import json
+import random
 from datetime import datetime, timedelta, timezone
 from werkzeug.security import generate_password_hash
 from app import config
@@ -67,6 +68,80 @@ TICKETS = [
     ("Monitor w gabinecie migocze", "Monitor w gabinecie nr 2 migocze i gasnie.", "Zamkniete", 8, 4, 6),
 ]
 
+# Historia z ostatnich miesiecy — zeby raporty mialy trend, porownanie
+# z poprzednim okresem i dane o dotrzymaniu SLA. Kazda firma ma wlasny profil
+# awarii i wlasne tempo obslugi.
+#
+#   autor: (szablony zgloszen, liczba zgloszen, czas rozwiazania jako
+#           ulamek terminu SLA — od, do; powyzej 1.0 oznacza przekroczenie)
+HISTORIA = {
+    1: ([("Kasa nie laczy sie z internetem", "Terminal platniczy w sklepie traci polaczenie z siecia."),
+         ("Drukarka paragonow nie drukuje", "Drukarka przy kasie zacina papier."),
+         ("Nie dochodza zamowienia mailem", "Zamowienia od klientow nie trafiaja do skrzynki pocztowej."),
+         ("Laptop w biurze sie przegrzewa", "Laptop kierownika przegrzewa sie po godzinie pracy.")],
+        22, (0.3, 1.1)),
+    2: ([("Program ksiegowy sie zawiesza", "System ksiegowy zawiesza sie przy zamykaniu miesiaca."),
+         ("Wygasla licencja programu", "Program pokazuje komunikat o wygaslej licencji."),
+         ("Reset hasla do systemu", "Pracownik zapomnial hasla do logowania."),
+         ("Excel nie otwiera raportow", "Excel zawiesza sie przy otwieraniu duzych plikow.")],
+        26, (0.2, 0.8)),
+    3: ([("Podejrzany mail od klienta", "Wiadomosc z prosba o podanie hasla, wyglada na phishing."),
+         ("Outlook nie wysyla poczty", "Wiadomosci zostaja w skrzynce nadawczej Outlook."),
+         ("Brak dostepu do folderu", "Nie mam uprawnien do folderu z aktami spraw."),
+         ("Zablokowane konto", "Konto zostalo zablokowane po kilku probach logowania.")],
+        20, (0.4, 1.3)),
+    7: ([("Brak Wi-Fi w magazynie", "Terminale w magazynie traca polaczenie z siecia wifi."),
+         ("VPN nie dziala w terenie", "Handlowcy nie moga polaczyc sie z VPN."),
+         ("Router w hali sie restartuje", "Router restartuje sie kilka razy dziennie."),
+         ("Drukarka etykiet zacina papier", "Drukarka etykiet w magazynie zacina papier.")],
+        30, (0.6, 2.2)),
+    8: ([("Monitor w gabinecie gasnie", "Monitor w gabinecie migocze i gasnie."),
+         ("Aplikacja do wizyt sie zawiesza", "Program do rejestracji wizyt zawiesza sie przy zapisie."),
+         ("Skaner nie wykrywa kart", "Skaner w rejestracji nie wykrywa kart pacjentow."),
+         ("Komputer nie startuje", "Stacja robocza w rejestracji nie uruchamia sie rano.")],
+        18, (0.3, 1.0)),
+}
+HISTORIA_DNI = (9, 120)       # historia konczy sie tam, gdzie zaczynaja TICKETS
+TECHNICY = (4, 5)
+
+
+def _dodaj_zgloszenie(conn, title, desc, status, created_by, assigned_to, client_id,
+                      utworzono, rozwiazano=None, zamknieto=None):
+    """Zgloszenie wraz z historia zmian spojna z jego statusem."""
+    ai = categorize(title, desc)
+    created = str(utworzono)
+    tid = conn.execute(
+        """INSERT INTO tickets
+           (title, description, category, priority, status, created_by, assigned_to,
+            ai_categorized, ai_pewnosc, sla_deadline, created_at, updated_at, closed_at,
+            client_id)
+           VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?,?)""",
+        (title, desc, ai["kategoria"], ai["priorytet"], status, created_by, assigned_to,
+         ai["pewnosc"], str(utworzono + timedelta(hours=SLA_HOURS[ai["priorytet"]])),
+         created, str(zamknieto or rozwiazano or utworzono),
+         str(zamknieto) if zamknieto else None, client_id),
+    ).lastrowid
+
+    wpisy = [(created_by, "Utworzenie", None, "Nowe", created),
+             (None, "Kategoryzacja AI", None, json.dumps(ai, ensure_ascii=False), created)]
+    if status != "Nowe":
+        wpisy.append((assigned_to, "Zmiana statusu", "Nowe", "W trakcie",
+                      str(utworzono + timedelta(minutes=15))))
+    if rozwiazano:
+        wpisy.append((assigned_to, "Zmiana statusu", "W trakcie", "Rozwiazane", str(rozwiazano)))
+    if zamknieto:
+        wpisy.append((assigned_to, "Zmiana statusu", "Rozwiazane", "Zamkniete", str(zamknieto)))
+    conn.executemany(
+        "INSERT INTO audit_log (ticket_id, user_id, action, old_value, new_value, timestamp)"
+        " VALUES (?,?,?,?,?,?)", [(tid, *w) for w in wpisy])
+    return ai
+
+
+def _rozwiazanie(utworzono, priorytet, ulamek, now):
+    """Chwila rozwiazania jako ulamek terminu SLA — nie pozniej niz godzine temu."""
+    return min(utworzono + timedelta(hours=SLA_HOURS[priorytet] * ulamek),
+               now - timedelta(hours=1))
+
 
 def seed():
     if os.path.exists(config.DB_PATH):
@@ -94,37 +169,37 @@ def seed():
 
     # UTC w formacie SQLite — tak samo jak znaczniki zapisywane przez aplikacje.
     now = datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None)
-    for title, desc, status, created_by, assigned_to, days_ago in TICKETS:
-        ai = categorize(title, desc)
-        poczatek = now - timedelta(days=days_ago, hours=3)
-        created = str(poczatek)
-        deadline = str(poczatek + timedelta(hours=SLA_HOURS[ai["priorytet"]]))
-        closed = str(now) if status == "Zamkniete" else None
 
-        tid = conn.execute(
-            """INSERT INTO tickets
-               (title, description, category, priority, status, created_by, assigned_to,
-                ai_categorized, ai_pewnosc, sla_deadline, created_at, updated_at, closed_at,
-                client_id)
-               VALUES (?,?,?,?,?,?,?,1,?,?,?,?,?,?)""",
-            (title, desc, ai["kategoria"], ai["priorytet"], status, created_by, assigned_to,
-             ai["pewnosc"], deadline, created, created, closed,
-             klient_uzytkownika[created_by]),
-        ).lastrowid
+    # Historia — starsza od zgloszen z listy TICKETS i zawsze identyczna
+    # (staly zarodek losowania), wiec raporty z danych demonstracyjnych sa
+    # powtarzalne. Identyfikatory rosna wraz z data, jak w prawdziwej bazie.
+    los = random.Random(2026)
+    historia = []
+    for autor, (szablony, liczba, (szybko, wolno)) in HISTORIA.items():
+        for _ in range(liczba):
+            title, desc = los.choice(szablony)
+            utworzono = now - timedelta(days=los.randint(*HISTORIA_DNI),
+                                        hours=los.randint(0, 9), minutes=los.randint(0, 59))
+            historia.append((utworzono, title, desc, autor, los.choice(TECHNICY),
+                             los.uniform(szybko, wolno), los.uniform(1, 30)))
+    for utworzono, title, desc, autor, technik, ulamek, do_zamkniecia in sorted(historia):
+        priorytet = categorize(title, desc)["priorytet"]
+        rozwiazano = _rozwiazanie(utworzono, priorytet, ulamek, now)
+        _dodaj_zgloszenie(conn, title, desc, "Zamkniete", autor, technik,
+                          klient_uzytkownika[autor], utworzono, rozwiazano,
+                          rozwiazano + timedelta(hours=do_zamkniecia))
 
-        conn.execute(
-            "INSERT INTO audit_log (ticket_id, user_id, action, new_value, timestamp) VALUES (?,?,?,?,?)",
-            (tid, created_by, "Utworzenie", "Nowe", created),
-        )
-        conn.execute(
-            "INSERT INTO audit_log (ticket_id, user_id, action, new_value, timestamp) VALUES (?,?,?,?,?)",
-            (tid, None, "Kategoryzacja AI", json.dumps(ai, ensure_ascii=False), created),
-        )
-        if status in ("W trakcie", "Rozwiazane", "Zamkniete"):
-            conn.execute(
-                "INSERT INTO audit_log (ticket_id, user_id, action, old_value, new_value, timestamp) VALUES (?,?,?,?,?,?)",
-                (tid, assigned_to, "Zmiana statusu", "Nowe", "W trakcie", created),
-            )
+    for title, desc, status, created_by, assigned_to, days_ago in sorted(
+            TICKETS, key=lambda t: -t[5]):
+        utworzono = now - timedelta(days=days_ago, hours=3)
+        rozwiazano = zamknieto = None
+        if status in ("Rozwiazane", "Zamkniete"):
+            priorytet = categorize(title, desc)["priorytet"]
+            rozwiazano = _rozwiazanie(utworzono, priorytet, 0.7, now)
+        if status == "Zamkniete":
+            zamknieto = min(rozwiazano + timedelta(hours=4), now)
+        _dodaj_zgloszenie(conn, title, desc, status, created_by, assigned_to,
+                          klient_uzytkownika[created_by], utworzono, rozwiazano, zamknieto)
 
     conn.commit()
 

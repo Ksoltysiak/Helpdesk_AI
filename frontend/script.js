@@ -14,6 +14,8 @@ let state = {
   filterPriority: '',
   filterClient: '',
   klienci: null,        // lista klientów do filtra — pobierana raz na sesję
+  raport: { klient: '', zakres: '30', od: '', do: '' },   // ostatnie ustawienia raportu
+  ostatniRaport: null,
   page: 1,
 };
 
@@ -98,7 +100,8 @@ function showLoginError(msg) {
 
 function doLogout() {
   state.userId = null; state.token = null; state.user = null; state.role = null;
-  state.clientName = null; state.klienci = null;
+  state.clientName = null; state.klienci = null; state.ostatniRaport = null;
+  state.raport = { klient: '', zakres: '30', od: '', do: '' };
   state.filterStatus = ''; state.filterPriority = ''; state.filterClient = ''; state.page = 1;
   sessionStorage.removeItem('helpdesk_token');
   document.getElementById('loginScreen').style.display = 'flex';
@@ -152,6 +155,10 @@ function setupSidebar() {
       <a class="nav-item" data-view="clients" onclick="navigate('clients')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 9h1M14 9h1M9 13h1M14 13h1M9 17h1M14 17h1"/></svg>
         Klienci
+      </a>
+      <a class="nav-item" data-view="reports" onclick="navigate('reports')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Raporty
       </a>`;
   }
 
@@ -174,6 +181,7 @@ function navigate(view) {
     'my-tickets':  'Moje zgłoszenia',
     'all-tickets': 'Wszystkie zgłoszenia',
     'clients':     'Klienci',
+    'reports':     'Raporty',
   };
   document.getElementById('pageTitle').textContent = titles[view] || 'HelpDesk IT';
   renderView(view);
@@ -188,6 +196,7 @@ function renderView(view) {
     case 'my-tickets':  renderMyTickets(); break;
     case 'all-tickets': renderAllTickets(); break;
     case 'clients':     renderClients(); break;
+    case 'reports':     renderReports(); break;
     default:            renderDashboard();
   }
 }
@@ -432,6 +441,9 @@ async function renderClients() {
         <td>${k.otwartych
           ? `<span class="badge badge-wrealizacji">${k.otwartych}</span>`
           : '<span class="td-muted">0</span>'}</td>
+        <td style="text-align:right">
+          <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();pokazRaportKlienta(${k.id})">Raport</button>
+        </td>
       </tr>`).join('');
 
     c.innerHTML = `
@@ -442,7 +454,7 @@ async function renderClients() {
         ${klienci.length ? `
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Firma</th><th>Pracownicy</th><th>Zgłoszenia</th><th>Otwarte</th></tr></thead>
+              <thead><tr><th>Firma</th><th>Pracownicy</th><th>Zgłoszenia</th><th>Otwarte</th><th></th></tr></thead>
               <tbody>${rows}</tbody>
             </table>
           </div>` : emptyState('Brak klientów w systemie.')}
@@ -452,12 +464,338 @@ async function renderClients() {
   }
 }
 
+function pokazRaportKlienta(id) {
+  state.raport.klient = String(id);
+  navigate('reports');
+}
+
 function pokazZgloszeniaKlienta(id) {
   state.filterClient = String(id);
   state.filterStatus = '';
   state.filterPriority = '';
   navigate('all-tickets');
 }
+
+// ============================================================
+// REPORTS (technik/admin)
+// ============================================================
+// Doby raportu to doby UTC (tak liczy backend), więc „dziś" też w UTC.
+function dataUTC(dniWstecz = 0) {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - dniWstecz);
+  return d.toISOString().slice(0, 10);
+}
+
+// Daty RRRR-MM-DD formatujemy z tekstu, a nie przez new Date(): ten
+// zinterpretowałby je jako północ UTC i w strefach na zachód od Greenwich
+// pokazał poprzedni dzień.
+function formatDzien(iso) {
+  const [r, m, d] = iso.split('-');
+  return `${d}.${m}.${r}`;
+}
+function formatMiesiac(iso) {
+  const [r, m] = iso.split('-');
+  return `${m}.${r}`;
+}
+function formatLiczba(x) {
+  return x.toLocaleString('pl-PL', { maximumFractionDigits: 1 });
+}
+function formatProcent(x) {
+  return x === null ? '—' : `${formatLiczba(x)}%`;
+}
+function formatCzas(godzin) {
+  if (godzin === null) return '—';
+  if (godzin < 1)  return `${Math.round(godzin * 60)} min`;
+  if (godzin < 48) return `${formatLiczba(godzin)} h`;
+  return `${formatLiczba(godzin / 24)} dni`;
+}
+
+const ZAKRESY_RAPORTU = [
+  ['7', 'Ostatnie 7 dni'], ['30', 'Ostatnie 30 dni'], ['90', 'Ostatnie 90 dni'],
+  ['365', 'Ostatnie 12 miesięcy'], ['wlasny', 'Własny zakres'],
+];
+
+async function renderReports() {
+  const c = document.getElementById('mainContent');
+  try {
+    const klienci = await pobierzKlientow();
+    const r = state.raport;
+    const ukryj = r.zakres === 'wlasny' ? '' : 'hidden';
+    c.innerHTML = `
+      <div class="card no-print">
+        <div class="report-controls">
+          <div class="form-field">
+            <label class="form-label" for="raportKlient">Klient</label>
+            <select class="form-input" id="raportKlient">
+              <option value="">Wszyscy klienci</option>
+              ${klienci.map(k => `<option value="${k.id}" ${String(k.id) === r.klient ? 'selected' : ''}>${escHtml(k.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="raportZakres">Okres</label>
+            <select class="form-input" id="raportZakres" onchange="przelaczZakresRaportu()">
+              ${ZAKRESY_RAPORTU.map(([v, l]) => `<option value="${v}" ${v === r.zakres ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-field raport-daty" ${ukryj}>
+            <label class="form-label" for="raportOd">Od</label>
+            <input class="form-input" type="date" id="raportOd" value="${escHtml(r.od)}" max="${dataUTC()}">
+          </div>
+          <div class="form-field raport-daty" ${ukryj}>
+            <label class="form-label" for="raportDo">Do</label>
+            <input class="form-input" type="date" id="raportDo" value="${escHtml(r.do)}">
+          </div>
+          <div class="report-actions">
+            <button class="btn btn-primary" onclick="wygenerujRaport()">Generuj raport</button>
+            <button class="btn btn-secondary" id="raportDrukuj" onclick="drukujRaport()" disabled>Drukuj / PDF</button>
+          </div>
+        </div>
+      </div>
+      <div id="raportWynik"></div>`;
+    wygenerujRaport();
+  } catch (e) {
+    c.innerHTML = errorCard(e.message);
+  }
+}
+
+function przelaczZakresRaportu() {
+  const wlasny = document.getElementById('raportZakres').value === 'wlasny';
+  document.querySelectorAll('.raport-daty').forEach(el => { el.hidden = !wlasny; });
+  if (wlasny && !document.getElementById('raportOd').value) {
+    document.getElementById('raportOd').value = dataUTC(29);
+    document.getElementById('raportDo').value = dataUTC();
+  }
+}
+
+async function wygenerujRaport() {
+  const r = state.raport;
+  r.klient = document.getElementById('raportKlient').value;
+  r.zakres = document.getElementById('raportZakres').value;
+
+  const params = new URLSearchParams();
+  if (r.klient) params.set('client_id', r.klient);
+  if (r.zakres === 'wlasny') {
+    r.od = document.getElementById('raportOd').value;
+    r.do = document.getElementById('raportDo').value;
+    if (r.od) params.set('od', r.od);
+    if (r.do) params.set('do', r.do);
+  } else {
+    params.set('od', dataUTC(Number(r.zakres) - 1));   // „od … do dziś"
+  }
+
+  // Szybkie kolejne kliknięcia: wynik starszego zapytania, który przyszedł
+  // później, nie może nadpisać nowszego raportu.
+  const numer = wygenerujRaport.numer = (wygenerujRaport.numer || 0) + 1;
+  document.getElementById('raportDrukuj').disabled = true;
+  document.getElementById('raportWynik').innerHTML = spinner();
+  state.ostatniRaport = null;
+
+  let html;
+  try {
+    const dane = await apiFetch(`/reports?${params}`);
+    if (numer !== wygenerujRaport.numer) return;
+    state.ostatniRaport = dane;
+    html = renderRaport(dane);
+  } catch (e) {
+    if (numer !== wygenerujRaport.numer) return;
+    html = `<div style="margin-top:1rem">${errorCard(e.message)}</div>`;
+  }
+  // Użytkownik mógł w międzyczasie przejść do innego widoku.
+  const wynik = document.getElementById('raportWynik');
+  if (!wynik) return;
+  wynik.innerHTML = html;
+  document.getElementById('raportDrukuj').disabled = !state.ostatniRaport;
+}
+
+function kpiRaportu(etykieta, wartosc, podpis, kolor = '', dodatek = '') {
+  return `
+    <div class="card kpi-card">
+      <div class="kpi-label">${etykieta}</div>
+      <div class="kpi-value" ${kolor ? `style="color:${kolor}"` : ''}>${wartosc}${dodatek}</div>
+      <div class="kpi-sub">${podpis}</div>
+    </div>`;
+}
+
+// Więcej zgłoszeń to dla klienta gorzej — wzrost na czerwono, spadek na zielono.
+function zmianaHtml(zmiana, teraz, poprzednio, klasa = 'kpi-delta') {
+  if (zmiana === null) {
+    return teraz > 0 && poprzednio === 0 ? `<span class="${klasa} delta-none">nowe</span>` : '';
+  }
+  if (zmiana === 0) return `<span class="${klasa} delta-none">bez zmian</span>`;
+  const wzrost = zmiana > 0;
+  return `<span class="${klasa} ${wzrost ? 'delta-up' : 'delta-down'}">${wzrost ? '▲' : '▼'} ${formatLiczba(Math.abs(zmiana))}%</span>`;
+}
+
+function wykresKategorii(wiersze) {
+  if (!wiersze.length) return emptyState('Brak zgłoszeń w tym okresie.');
+  const max = Math.max(1, ...wiersze.map(w => Math.max(w.liczba, w.poprzednio)));
+  const slupki = wiersze.map(w => {
+    const nazwa = escHtml(w.etykieta);
+    return `
+      <div class="bar-row" title="${nazwa}: ${w.liczba} (poprzedni okres: ${w.poprzednio})">
+        <div class="bar-label">${nazwa}</div>
+        <div class="bar-track">
+          ${w.liczba ? `<div class="bar-fill" style="width:${w.liczba / max * 100}%"></div>` : ''}
+          ${w.poprzednio ? `<div class="bar-prev" style="left:${w.poprzednio / max * 100}%"></div>` : ''}
+        </div>
+        <div class="bar-value">${w.liczba} ${zmianaHtml(w.zmiana_proc, w.liczba, w.poprzednio, '')}</div>
+      </div>`;
+  }).join('');
+  return slupki + `
+    <div class="chart-legend">
+      <span><span class="legend-swatch"></span>wybrany okres</span>
+      <span><span class="legend-line"></span>poprzedni okres</span>
+    </div>`;
+}
+
+const KOLORY_PRIORYTETOW = {
+  'Krytyczny': 'var(--color-error)', 'Wysoki': 'var(--color-orange)',
+  'Sredni': 'var(--color-warning)', 'Niski': 'var(--color-success)',
+};
+
+function wykresPriorytetow(wiersze, razem) {
+  if (!razem) return emptyState('Brak zgłoszeń w tym okresie.');
+  const max = Math.max(1, ...wiersze.map(w => w.liczba));
+  return wiersze.map(w => `
+    <div class="bar-row">
+      <div class="bar-label">${priorityBadge(w.priorytet)}</div>
+      <div class="bar-track">
+        ${w.liczba ? `<div class="bar-fill" style="width:${w.liczba / max * 100}%;background:${KOLORY_PRIORYTETOW[w.priorytet] || 'var(--color-text-muted)'}"></div>` : ''}
+      </div>
+      <div class="bar-value">${w.liczba} <small>${formatProcent(Math.round(w.liczba / razem * 1000) / 10)}</small></div>
+    </div>`).join('');
+}
+
+function wykresProblemow(problemy) {
+  if (!problemy.length) return emptyState('Moduł AI nie rozpoznał powtarzających się słów kluczowych.');
+  const max = problemy[0].liczba;
+  return problemy.map(p => `
+    <div class="bar-row">
+      <div class="bar-label" title="${escHtml(p.problem)}">${escHtml(p.problem)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${p.liczba / max * 100}%"></div></div>
+      <div class="bar-value">${p.liczba} <small>zgł.</small></div>
+    </div>`).join('') + `
+    <p style="font-size:var(--text-xs);color:var(--color-text-muted);margin-top:0.75rem">
+      Problemy rozpoznane przez moduł AI w treści zgłoszeń.
+    </p>`;
+}
+
+// Szerokość rysunku odpowiada miejscu na ekranie, a nie stałej wartości —
+// inaczej na telefonie przeskalowany wykres miał podpisy wielkości 6 px.
+function wykresTrendu(trend, grupowanie) {
+  const obszar = document.getElementById('mainContent');
+  const W = Math.round(Math.min(960, Math.max(300, (obszar ? obszar.clientWidth : 700) - 90)));
+  const H = 200, L = 34, P = 6, G = 8, D = 24;
+  const n = trend.length;
+  const max = Math.max(1, ...trend.map(t => t.liczba));
+  const krok = (W - L - P) / n;
+  const szer = Math.max(1, krok * 0.72);
+  const y = v => G + (H - G - D) * (1 - v / max);
+  const etykieta = t => grupowanie === 'miesiac' ? formatMiesiac(t.okres) : formatDzien(t.okres).slice(0, 5);
+
+  // Podpisy osi X: przy wielu słupkach co kilka, zawsze pierwszy i ostatni.
+  // Jeden podpis potrzebuje ok. 70 px szerokości.
+  const co = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(W / 70))));
+  const podpisy = trend.map((t, i) => (i % co === 0 || i === n - 1) && !(i !== n - 1 && n - 1 - i < co / 2)
+    ? `<text class="trend-label" x="${L + krok * i + krok / 2}" y="${H - 6}" text-anchor="middle">${etykieta(t)}</text>` : '').join('');
+
+  const polowa = Math.round(max / 2);
+  const linie = [0, polowa, max].filter((v, i, a) => a.indexOf(v) === i).map(v => `
+    <line class="trend-grid" x1="${L}" x2="${W - P}" y1="${y(v)}" y2="${y(v)}"/>
+    <text class="trend-label" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`).join('');
+
+  const slupki = trend.map((t, i) => {
+    const wys = (H - G - D) * (t.liczba / max);
+    return `<rect class="trend-bar" x="${L + krok * i + (krok - szer) / 2}" y="${H - D - wys}" width="${szer}" height="${wys}" rx="1.5">
+      <title>${grupowanie === 'miesiac' ? formatMiesiac(t.okres) : formatDzien(t.okres)}${grupowanie === 'tydzien' ? ' (tydzień)' : ''}: ${t.liczba}</title></rect>`;
+  }).join('');
+
+  const suma = trend.reduce((s, t) => s + t.liczba, 0);
+  return `<svg class="trend-chart" viewBox="0 0 ${W} ${H}" role="img"
+               aria-label="Trend zgłoszeń: ${suma} zgłoszeń w ${n} przedziałach, najwięcej ${max} w jednym">
+    ${linie}${slupki}${podpisy}</svg>`;
+}
+
+function renderRaport(d) {
+  const p = d.podsumowanie;
+  const pop = d.poprzedni_okres;
+  const nazwa = d.klient ? d.klient.name : 'Wszyscy klienci';
+  const grup = { dzien: 'dziennie', tydzien: 'tygodniowo', miesiac: 'miesięcznie' }[d.okres.grupowanie];
+  const kolorSla = p.procent_w_terminie_sla === null ? ''
+    : p.procent_w_terminie_sla >= 80 ? 'var(--color-success)' : 'var(--color-error)';
+
+  return `
+    <div class="report-header">
+      <div>
+        <div class="report-title">Raport zgłoszeń — ${escHtml(nazwa)}</div>
+        <div class="report-meta">
+          Okres: ${formatDzien(d.okres.od)} – ${formatDzien(d.okres.do)} (${d.okres.dni} dni) ·
+          porównanie z okresem ${formatDzien(pop.od)} – ${formatDzien(pop.do)}
+        </div>
+      </div>
+      <div class="report-meta">Wygenerowano: ${new Date().toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' })}</div>
+    </div>
+
+    <div class="report-grid report-kpis">
+      ${kpiRaportu('Zgłoszenia', p.zgloszen, `poprzednio: ${pop.zgloszen}`, '',
+                   zmianaHtml(pop.zmiana_proc, p.zgloszen, pop.zgloszen))}
+      ${kpiRaportu('Rozwiązane', formatProcent(p.procent_rozwiazanych), `${p.rozwiazanych} z ${p.zgloszen}`)}
+      ${kpiRaportu('Średni czas rozwiązania', formatCzas(p.sredni_czas_rozwiazania_h), 'od zgłoszenia do rozwiązania')}
+      ${kpiRaportu('W terminie SLA', formatProcent(p.procent_w_terminie_sla),
+                   `${p.w_terminie_sla} z ${p.rozwiazanych_z_terminem} rozwiązanych`, kolorSla)}
+      ${kpiRaportu('Po terminie', p.otwartych_po_terminie, `z ${p.otwartych} otwartych`,
+                   p.otwartych_po_terminie ? 'var(--color-error)' : '')}
+    </div>
+
+    <div class="report-grid">
+      <div class="card">
+        <div class="section-header"><div class="section-title">Zgłoszenia według kategorii</div></div>
+        ${wykresKategorii(d.wg_kategorii)}
+      </div>
+      <div class="card">
+        <div class="section-header"><div class="section-title">Priorytety</div></div>
+        ${wykresPriorytetow(d.wg_priorytetu, p.zgloszen)}
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="section-header"><div class="section-title">Trend zgłoszeń (${grup})</div></div>
+      ${p.zgloszen ? wykresTrendu(d.trend, d.okres.grupowanie) : emptyState('Brak zgłoszeń w tym okresie.')}
+    </div>
+
+    <div class="report-grid">
+      <div class="card">
+        <div class="section-header"><div class="section-title">Najczęstsze problemy</div></div>
+        ${wykresProblemow(d.najczestsze_problemy)}
+      </div>
+      <div class="card">
+        <div class="section-header"><div class="section-title">Wnioski i rekomendacje</div></div>
+        <ul class="recommendations">${d.rekomendacje.map(t => `<li>${escHtml(t)}</li>`).join('')}</ul>
+      </div>
+    </div>`;
+}
+
+// Nazwa pliku PDF w oknie drukowania pochodzi z tytułu strony.
+function drukujRaport() {
+  const d = state.ostatniRaport;
+  if (!d) return;
+  drukujRaport.tytul = document.title;
+  document.title = `Raport ${d.klient ? d.klient.name : 'wszyscy klienci'} ${d.okres.od} - ${d.okres.do}`;
+  window.print();
+}
+
+// Wydruk zawsze w jasnym motywie (także z Ctrl+P) — ciemne tło na papierze
+// jest nieczytelne i zużywa toner. Tytuł wracamy dopiero po wydruku, bo
+// część przeglądarek otwiera okno drukowania asynchronicznie.
+let motywPrzedWydrukiem = null;
+window.addEventListener('beforeprint', () => {
+  motywPrzedWydrukiem = document.documentElement.getAttribute('data-theme');
+  document.documentElement.setAttribute('data-theme', 'light');
+});
+window.addEventListener('afterprint', () => {
+  if (motywPrzedWydrukiem) document.documentElement.setAttribute('data-theme', motywPrzedWydrukiem);
+  if (drukujRaport.tytul) { document.title = drukujRaport.tytul; drukujRaport.tytul = null; }
+});
 
 // ============================================================
 // NEW TICKET FORM
