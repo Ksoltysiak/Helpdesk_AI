@@ -21,7 +21,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import safe_join
 
 from app import config
-from app.api import auth, errors, meta, tickets
+from app.api import auth, clients, errors, meta, tickets
 from app.data.database import close_db
 from app.extensions import limiter
 
@@ -46,7 +46,7 @@ def create_app():
     app.teardown_appcontext(close_db)
     limiter.init_app(app)
 
-    for modul in (auth.bp, tickets.bp, meta.bp):
+    for modul in (auth.bp, tickets.bp, clients.bp, meta.bp):
         app.register_blueprint(modul, url_prefix="/api")
 
     errors.zarejestruj(app)

@@ -7,13 +7,15 @@ i łatwiej sprawdzić, że każde filtrowanie respektuje granicę dostępu.
 
 from app.data.database import get_db, czas_utc
 
-# Nazwiska dołączane przez LEFT JOIN — interfejs pokazuje osobę zamiast
-# surowego identyfikatora.
+# Nazwiska i nazwa klienta dołączane przez LEFT JOIN — interfejs pokazuje
+# osobę i firmę zamiast surowego identyfikatora.
 SELECT_ZGLOSZENIA = """
-    SELECT t.*, uc.name created_by_name, ua.name assigned_to_name
+    SELECT t.*, uc.name created_by_name, ua.name assigned_to_name,
+           c.name client_name
     FROM tickets t
     LEFT JOIN users uc ON t.created_by = uc.id
     LEFT JOIN users ua ON t.assigned_to = ua.id
+    LEFT JOIN clients c ON t.client_id = c.id
 """
 
 
@@ -39,11 +41,14 @@ def serialize(t):
         "created_at":     czas_utc(t["created_at"]),
         "updated_at":     czas_utc(t["updated_at"]),
         "closed_at":      czas_utc(t["closed_at"]),
+        "client_id":      t["client_id"],
     }
     if "created_by_name" in keys:
         data["created_by_name"] = t["created_by_name"]
     if "assigned_to_name" in keys:
         data["assigned_to_name"] = t["assigned_to_name"]
+    if "client_name" in keys:
+        data["client_name"] = t["client_name"]
     return data
 
 
@@ -60,7 +65,7 @@ def zbuduj_warunki(user, filtry):
         warunki.append("t.created_by = ?")
         params.append(user["id"])
     else:
-        for pole in ("status", "priority", "category"):
+        for pole in ("status", "priority", "category", "client_id"):
             wartosc = filtry.get(pole)
             if wartosc:
                 warunki.append(f"t.{pole} = ?")
@@ -102,16 +107,19 @@ def istnieje(ticket_id):
     ).fetchone() is not None
 
 
-def utworz(title, description, created_by, kategoria, priorytet, pewnosc, sla_deadline):
+def utworz(title, description, created_by, client_id,
+           kategoria, priorytet, pewnosc, sla_deadline):
     """Zgłoszenie od razu z wynikiem kategoryzacji — jednym zapisem.
 
     Kategoryzacja nie potrzebuje identyfikatora zgłoszenia, więc nie ma
     powodu zapisywać wiersza, a potem go poprawiać drugim UPDATE.
     """
     return get_db().execute(
-        "INSERT INTO tickets (title, description, created_by, category, priority,"
-        " ai_categorized, ai_pewnosc, sla_deadline) VALUES (?,?,?,?,?,1,?,?)",
-        (title, description, created_by, kategoria, priorytet, pewnosc, sla_deadline),
+        "INSERT INTO tickets (title, description, created_by, client_id, category,"
+        " priority, ai_categorized, ai_pewnosc, sla_deadline)"
+        " VALUES (?,?,?,?,?,?,1,?,?)",
+        (title, description, created_by, client_id, kategoria, priorytet,
+         pewnosc, sla_deadline),
     ).lastrowid
 
 

@@ -90,7 +90,8 @@ def test_typ_inny_niz_tekst_nie_powoduje_bledu_serwera(client):
 def test_auth_me_zwraca_dane_zalogowanego(client, pracownik):
     resp = client.get("/api/auth/me", headers=pracownik)
     assert resp.status_code == 200
-    assert resp.get_json() == {"id": 1, "name": "Katarzyna Nowak", "role": "pracownik"}
+    assert resp.get_json() == {"id": 1, "name": "Katarzyna Nowak", "role": "pracownik",
+                               "client_id": 1, "client_name": "Firma Testowa A"}
 
 
 def test_auth_me_nie_zwraca_hasla(client, technik):
@@ -161,6 +162,7 @@ def test_token_bez_identyfikatora_uzytkownika_jest_odrzucany(client):
     ("patch", "/api/tickets/1",       {"status": "W trakcie"}),
     ("post",  "/api/tickets/1/notes", {"content": "N"}),
     ("get",   "/api/tickets/1/audit", None),
+    ("get",   "/api/clients",         None),
 ])
 def test_endpointy_wymagajace_roli_odrzucaja_brak_tokenu(client, metoda, sciezka, dane):
     """Kontrola roli nie moze byc jedyna bramka — brak tokenu tez daje 401."""
