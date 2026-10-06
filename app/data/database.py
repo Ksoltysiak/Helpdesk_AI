@@ -90,6 +90,16 @@ CREATE INDEX IF NOT EXISTS idx_tickets_autor_id        ON tickets(created_by, id
 -- Lista zgloszen jednego klienta (filtr technika), sortowana jak kazda lista.
 CREATE INDEX IF NOT EXISTS idx_tickets_klient_id       ON tickets(client_id, id DESC);
 
+-- Raporty wybieraja zgloszenia z okresu — jednego klienta albo wszystkich.
+-- Indeksy POKRYWAJA kolumny uzywane w raporcie: przy okresie obejmujacym duza
+-- czesc tabeli odczyt wiersz po wierszu przez indeks bylby wolniejszy niz
+-- przegladanie calej tabeli, a tak raport czyta tylko waski indeks, bez
+-- siegania do wierszy z dlugimi opisami zgloszen.
+CREATE INDEX IF NOT EXISTS idx_tickets_klient_raport ON tickets(
+    client_id, created_at, category, priority, status, sla_deadline, closed_at);
+CREATE INDEX IF NOT EXISTS idx_tickets_raport ON tickets(
+    created_at, category, priority, status, sla_deadline, closed_at);
+
 -- Pobieranie notatek i historii konkretnego zgloszenia.
 CREATE INDEX IF NOT EXISTS idx_notes_ticket     ON notes(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_audit_ticket     ON audit_log(ticket_id);
@@ -98,6 +108,12 @@ CREATE INDEX IF NOT EXISTS idx_audit_ticket     ON audit_log(ticket_id);
 -- rosnie najszybciej (kilka wpisow na zgloszenie), a bez indeksu kazde
 -- otwarcie zestawienia przeszukiwaloby go w calosci.
 CREATE INDEX IF NOT EXISTS idx_audit_akcja      ON audit_log(action, ticket_id);
+
+-- Chwila rozwiazania zgloszenia (raporty: czas obslugi i dotrzymanie SLA).
+-- Indeks czesciowy obejmuje tylko wpisy „-> Rozwiazane" — jest maly, a raport
+-- odczytuje z niego MAX(timestamp) bez siegania do tabeli.
+CREATE INDEX IF NOT EXISTS idx_audit_rozwiazanie ON audit_log(ticket_id, timestamp)
+    WHERE action = 'Zmiana statusu' AND new_value = 'Rozwiazane';
 """
 
 # Ustawienia obowiazujace dla KAZDEGO polaczenia — nie sa zapisywane w pliku

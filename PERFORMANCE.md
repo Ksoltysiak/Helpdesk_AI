@@ -116,6 +116,51 @@ Ograniczono do potrzebnych kolumn.
 
 ---
 
+## Raporty dla klientów — test obciążeniowy
+
+Raport zlicza zgłoszenia klienta z wybranego okresu kilkoma zapytaniami
+(podsumowanie, kategorie w dwóch okresach, priorytety, trend, słowa kluczowe
+z dziennika audytu). Sprawdzono go na bazie znacznie większej niż realna dla
+małej firmy: **100 000 zgłoszeń**, ok. 290 000 wpisów audytu, 50 klientów,
+dwa lata historii, 20% dat w starszym zapisie z literą „T". Mediana z 15
+wywołań `GET /api/reports`:
+
+| Raport | Przed indeksami | Po indeksach |
+|---|---|---|
+| Jeden klient, 30 dni | 18,6 ms | **4,7 ms** |
+| Jeden klient, 366 dni | 46,9 ms | **19,3 ms** |
+| Wszyscy klienci, 30 dni | 396,3 ms | **30,4 ms** |
+| Wszyscy klienci, 366 dni (50 000 zgłoszeń w okresie) | 681,3 ms | **347,7 ms** |
+
+**Co zadziałało, a co nie.** Pierwsza próba — zwykłe indeksy na dacie
+utworzenia — przyspieszyła krótkie okresy, ale **spowolniła** raport roczny
+(podsumowanie z 229 do 362 ms): gdy okres obejmuje połowę tabeli, odczyt
+wiersz po wierszu przez indeks jest wolniejszy niż przejrzenie całej tabeli.
+Rozwiązaniem są **indeksy pokrywające** — zawierają wszystkie kolumny
+potrzebne raportowi, więc baza czyta tylko wąski indeks i w ogóle nie sięga
+do wierszy z długimi opisami zgłoszeń. Chwilę rozwiązania zgłoszenia podaje
+mały indeks częściowy, obejmujący wyłącznie wpisy „→ Rozwiązane".
+
+**Stabilny plan zapytania.** Zapytanie o słowa kluczowe przy zebranych
+statystykach (`ANALYZE`) zwalniało trzykrotnie, bo planista zaczynał od całego
+dziennika audytu. Kolejność złączenia jest teraz ustalona (`CROSS JOIN`), więc
+czas nie zależy od tego, czy statystyki istnieją.
+
+**Odporność i współbieżność** (ten sam test):
+
+- **2000 losowych zapytań** z błędnymi parametrami (losowe znaki, Unicode,
+  daty spoza zakresu, liczby 25-cyfrowe, próby wstrzyknięcia SQL) — wyłącznie
+  odpowiedzi 200/400/404, **żadnego błędu 500**;
+- **600 równoległych zapytań** (32 wątki, prawdziwy serwer wielowątkowy):
+  raporty przeplatane z zakładaniem zgłoszeń i zmianą statusów — **0 błędów**,
+  liczba zgłoszeń w bazie zgodna z liczbą utworzonych, a suma raportów
+  wszystkich klientów równa raportowi zbiorczemu.
+
+Indeksy raportów sprawdza test (`EXPLAIN QUERY PLAN` w `test_raporty.py`) —
+zmiana zapytania, która przestałaby z nich korzystać, zatrzyma się na CI.
+
+---
+
 ## Czego świadomie nie „optymalizowano"
 
 **Czas logowania (~100 ms) jest zamierzony.** To koszt funkcji `scrypt`,
@@ -145,5 +190,6 @@ sens dopiero przy bazie sieciowej (np. PostgreSQL).
 - **Brak stronicowania w ścieżce audytu.** Zgłoszenie z bardzo długą historią
   zwróci ją w całości. W praktyce liczba wpisów na zgłoszenie jest niewielka,
   ale przy dużym ruchu warto to ograniczyć.
-- **Brak pomiaru pod obciążeniem równoległym.** Pomiary są sekwencyjne;
-  zachowanie przy wielu jednoczesnych użytkownikach nie było badane.
+- **Obciążenie równoległe zbadano tylko dla raportów.** Test 600 równoległych
+  zapytań (raporty, nowe zgłoszenia, zmiany statusów) przeszedł bez błędów;
+  pozostałe pomiary są sekwencyjne.

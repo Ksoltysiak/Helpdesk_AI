@@ -57,6 +57,8 @@ tags:
     description: Cykl życia zgłoszenia IT
   - name: Klienci
     description: Firmy obsługiwane przez helpdesk
+  - name: Raporty
+    description: Zestawienia zgłoszeń dla klientów
   - name: Notatki i audyt
     description: Notatki techników i historia zmian
   - name: Pulpit i AI
@@ -613,6 +615,73 @@ paths:
           $ref: "#/components/responses/BrakUprawnien"
 
   # ---------------------------------------------------------------
+  /reports:
+    get:
+      tags: [Raporty]
+      summary: Raport zgłoszeń klienta za wybrany okres
+      description: |
+        Zestawienie dla klienta (albo wszystkich klientów, gdy pominięto
+        `client_id`): co psuło się najczęściej, jak szybko i czy w terminie
+        SLA rozwiązywano zgłoszenia oraz jak zmieniło się to względem
+        poprzedniego okresu tej samej długości.
+
+        **Okres:** daty `od` i `do` w formacie `RRRR-MM-DD`, obie włącznie,
+        liczone jako pełne doby UTC. Domyślnie ostatnie 30 dni; sama data
+        `od` oznacza „od tego dnia do dziś", sama data `do` — 30 dni
+        kończących się tego dnia. Najwyżej 366 dni.
+
+        **Definicje:**
+
+        - *rozwiązane* — status `Rozwiazane` lub `Zamkniete`;
+        - *czas rozwiązania* — od utworzenia do **ostatniego** przejścia do
+          statusu `Rozwiazane` (zgłoszenie otwarte ponownie liczy się od
+          drugiego rozwiązania); gdy w historii brak takiego wpisu — do
+          zamknięcia;
+        - *w terminie SLA* — rozwiązane przed upływem `sla_deadline`;
+        - *najczęstsze problemy* — słowa kluczowe, na podstawie których moduł
+          AI ocenił zgłoszenia (np. `vpn`, `drukark`).
+
+        Rekomendacje są regułowe — każda wynika z konkretnej liczby
+        w raporcie. Jest ich najwyżej pięć, od najważniejszych
+        (bezpieczeństwo, terminy SLA) do statystycznych. Wymaga roli
+        `technik` lub `admin`.
+      parameters:
+        - name: client_id
+          in: query
+          description: Klient; pominięty — raport zbiorczy wszystkich klientów
+          schema: { type: integer, minimum: 1, example: 2 }
+        - name: od
+          in: query
+          description: Pierwszy dzień okresu (włącznie)
+          schema: { type: string, format: date, example: "2026-09-01" }
+        - name: do
+          in: query
+          description: Ostatni dzień okresu (włącznie)
+          schema: { type: string, format: date, example: "2026-09-30" }
+      responses:
+        "200":
+          description: Raport
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Raport" }
+        "400":
+          description: Nieprawidłowy okres lub identyfikator klienta
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Blad" }
+              example: { error: "Okres raportu moze miec najwyzej 366 dni" }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+        "404":
+          description: Klient o podanym identyfikatorze nie istnieje
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Blad" }
+              example: { error: "Nie znaleziono klienta" }
+
+  # ---------------------------------------------------------------
   /ai/skutecznosc:
     get:
       tags: [Pulpit i AI]
@@ -817,6 +886,124 @@ components:
           type: integer
           description: Zgłoszenia o statusie innym niż `Zamkniete`
           example: 4
+
+    Raport:
+      type: object
+      required: [klient, okres, podsumowanie, poprzedni_okres, wg_kategorii,
+                 wg_priorytetu, trend, najczestsze_problemy, rekomendacje]
+      properties:
+        klient:
+          type: object
+          nullable: true
+          description: "`null` w raporcie zbiorczym wszystkich klientów"
+          required: [id, name]
+          properties:
+            id: { type: integer, example: 4 }
+            name: { type: string, example: Hurtownia Budowlana Cegiełka }
+        okres:
+          type: object
+          required: [od, do, dni, grupowanie]
+          properties:
+            od: { type: string, format: date, example: "2026-09-07" }
+            do: { type: string, format: date, example: "2026-10-06" }
+            dni: { type: integer, example: 30 }
+            grupowanie:
+              type: string
+              enum: [dzien, tydzien, miesiac]
+              description: |
+                Szerokość przedziałów trendu: do 31 dni — dni, do 183 dni —
+                tygodnie (od pierwszego dnia okresu), dłużej — miesiące.
+        podsumowanie:
+          type: object
+          required: [zgloszen, otwartych, rozwiazanych, procent_rozwiazanych,
+                     krytycznych, sredni_czas_rozwiazania_h, rozwiazanych_z_terminem,
+                     w_terminie_sla, procent_w_terminie_sla, otwartych_po_terminie]
+          properties:
+            zgloszen: { type: integer, example: 12 }
+            otwartych: { type: integer, example: 3 }
+            rozwiazanych: { type: integer, example: 9 }
+            procent_rozwiazanych: { type: number, nullable: true, example: 75.0 }
+            krytycznych: { type: integer, example: 2 }
+            sredni_czas_rozwiazania_h: { type: number, nullable: true, example: 5.4 }
+            rozwiazanych_z_terminem:
+              type: integer
+              description: Rozwiązane zgłoszenia, które miały termin SLA
+              example: 9
+            w_terminie_sla: { type: integer, example: 7 }
+            procent_w_terminie_sla: { type: number, nullable: true, example: 77.8 }
+            otwartych_po_terminie:
+              type: integer
+              description: Otwarte zgłoszenia, których termin SLA już minął
+              example: 1
+        poprzedni_okres:
+          type: object
+          required: [od, do, zgloszen, zmiana_proc]
+          properties:
+            od: { type: string, format: date, example: "2026-08-08" }
+            do: { type: string, format: date, example: "2026-09-06" }
+            zgloszen: { type: integer, example: 8 }
+            zmiana_proc:
+              type: number
+              nullable: true
+              description: "`null`, gdy w poprzednim okresie nie było zgłoszeń"
+              example: 50.0
+        wg_kategorii:
+          type: array
+          description: Od najczęstszej; także kategorie obecne tylko w poprzednim okresie
+          items:
+            type: object
+            required: [kategoria, etykieta, liczba, poprzednio, zmiana_proc]
+            properties:
+              kategoria:
+                allOf: [{ $ref: "#/components/schemas/Kategoria" }]
+                nullable: true
+              etykieta:
+                type: string
+                description: Nazwa do wyświetlenia klientowi (z polskimi znakami)
+                example: Sieć
+              liczba: { type: integer, example: 5 }
+              poprzednio: { type: integer, example: 2 }
+              zmiana_proc: { type: number, nullable: true, example: 150.0 }
+        wg_priorytetu:
+          type: array
+          description: Wszystkie priorytety od najpoważniejszego, także z zerem
+          items:
+            type: object
+            required: [priorytet, liczba]
+            properties:
+              priorytet:
+                allOf: [{ $ref: "#/components/schemas/Priorytet" }]
+                nullable: true
+              liczba: { type: integer, example: 2 }
+        trend:
+          type: array
+          description: Liczba zgłoszeń w kolejnych przedziałach — także zerowych
+          items:
+            type: object
+            required: [okres, liczba]
+            properties:
+              okres:
+                type: string
+                description: Początek przedziału (`RRRR-MM-DD`) albo miesiąc (`RRRR-MM`)
+                example: "2026-09-07"
+              liczba: { type: integer, example: 1 }
+        najczestsze_problemy:
+          type: array
+          description: |
+            Do pięciu problemów wskazanych przez słowa kluczowe modułu AI,
+            w czytelnej formie (rdzeń `drukark` → „drukarka"). Rdzenie tego
+            samego problemu są scalane, a zgłoszenie liczy się raz.
+          items:
+            type: object
+            required: [problem, liczba]
+            properties:
+              problem: { type: string, example: drukarka }
+              liczba: { type: integer, description: Liczba zgłoszeń, example: 4 }
+        rekomendacje:
+          type: array
+          items: { type: string }
+          example:
+            - "50% zgłoszeń dotyczy kategorii Sieć — to główne źródło problemów w tym okresie."
 
     Zgloszenie:
       type: object

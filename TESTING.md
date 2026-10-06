@@ -35,13 +35,13 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
 
 ```
                     ┌───────────────────────┐
-                    │   E2E — demo.py       │   21 sprawdzeń
+                    │   E2E — demo.py       │   25 sprawdzeń
                     │   działający serwer   │   ~3 s
                     ├───────────────────────┤
-                │      Integracyjne         │   252 testy
-                │   Flask + baza danych     │   ~18 s
+                │      Integracyjne         │   376 testów
+                │   Flask + baza danych     │   ~11 s
             ├───────────────────────────────────┤
-        │          Jednostkowe                  │   85 testów
+        │          Jednostkowe                  │   142 testy
         │      czysta logika, bez I/O           │   ~0,4 s
     └───────────────────────────────────────────────┘
 ```
@@ -49,18 +49,21 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
 | Warstwa | Plik | Testy | Zakres |
 |---|---|---|---|
 | Jednostkowa | `tests/test_ai.py` | 19 | Kategoryzacja AI, priorytety, SLA |
-| Jednostkowa | `tests/test_tokens.py` | 10 | Generowanie i weryfikacja JWT |
+| Jednostkowa | `tests/test_tokens.py` | 13 | Generowanie i weryfikacja JWT |
 | Jednostkowa | `tests/test_transitions.py` | 9 | Maszyna stanów zgłoszenia |
 | Jednostkowa | `tests/test_ai_skutecznosc.py` | 27 | Normalizacja polszczyzny, pewność, próg skuteczności |
-| Jednostkowa | `tests/test_architektura.py` | 20 | Kierunek zależności między warstwami |
-| Integracyjna | `tests/test_api_auth.py` | 28 | Logowanie, ochrona endpointów |
-| Integracyjna | `tests/test_api_tickets.py` | 68 | RBAC, CRUD, notatki, audyt |
-| Integracyjna | `tests/test_api_security.py` | 23 | Nagłówki, 404 API, limit żądań |
-| Integracyjna | `tests/test_openapi.py` | 27 | Zgodność dokumentacji z implementacją |
-| Integracyjna | `tests/test_walidacja_typow.py` | 44 | Typy danych wejściowych, błędy w JSON |
-| Integracyjna | `tests/test_wdrozenie.py` | 12 | HTTPS, HSTS, proxy, siła klucza |
-| Integracyjna | `tests/test_wydajnosc.py` | 49 | Stronicowanie, indeksy, kompresja, cache, health |
-| E2E | `demo.py` | 21 | Pełny przepływ przez HTTP |
+| Jednostkowa | `tests/test_architektura.py` | 27 | Kierunek zależności między warstwami |
+| Jednostkowa | `tests/test_raporty_reguly.py` | 47 | Okres raportu, trend, rekomendacje, odmiana liczebników |
+| Integracyjna | `tests/test_api_auth.py` | 30 | Logowanie, ochrona endpointów |
+| Integracyjna | `tests/test_api_tickets.py` | 77 | RBAC, CRUD, notatki, audyt |
+| Integracyjna | `tests/test_api_security.py` | 32 | Nagłówki, 404 API, limit żądań |
+| Integracyjna | `tests/test_klienci.py` | 21 | Klienci, izolacja firm, migracja, dane demonstracyjne |
+| Integracyjna | `tests/test_raporty.py` | 47 | Liczby raportu, granice okresu, odporność na dane, indeksy |
+| Integracyjna | `tests/test_openapi.py` | 30 | Zgodność dokumentacji z implementacją |
+| Integracyjna | `tests/test_walidacja_typow.py` | 69 | Typy danych wejściowych, błędy w JSON |
+| Integracyjna | `tests/test_wdrozenie.py` | 20 | HTTPS, HSTS, proxy, siła klucza |
+| Integracyjna | `tests/test_wydajnosc.py` | 50 | Stronicowanie, indeksy, kompresja, cache, health |
+| E2E | `demo.py` | 25 | Pełny przepływ przez HTTP |
 
 **Uwaga o kształcie piramidy.** Warstwa integracyjna jest tu liczniejsza niż
 jednostkowa — odwrotnie niż w podręcznikowym modelu. Jest to świadomy wybór:
@@ -266,6 +269,23 @@ wychwycą.
 Po każdej próbie pliki źródłowe przywrócono do stanu zgodnego z repozytorium
 (zweryfikowane poleceniem `git status`). Wszystkie trzy mutacje zostały
 wykryte — testy pilnują tych zachowań realnie, a nie pozornie.
+
+### Weryfikacja testów raportów
+
+Zapytania raportów sprawdzono tą samą metodą — każda mutacja odpowiada
+błędowi, który łatwo popełnić przy liczeniu statystyk:
+
+| # | Wprowadzona usterka | Wynik |
+|---|---|---|
+| R1 | Chwila rozwiązania jako **pierwsze** zamiast ostatniego przejścia do „Rozwiązane" (zgłoszenie otwarte ponownie wygląda na rozwiązane w terminie) | **2 testy nie przeszły** |
+| R2 | Usunięcie zabezpieczenia przed uszkodzonym JSON-em w dzienniku audytu | **12 testów nie przeszło** — raport kończył się błędem 500 |
+| R3 | Górna granica okresu włącznie (`<=` zamiast `<`) — zgłoszenie z północy kolejnego dnia trafia do raportu | **8 testów nie przeszło** |
+
+Dane testowe raportów (`tests/test_raporty.py`) celowo zawierają przypadki
+graniczne: zgłoszenie z ostatniej sekundy okresu i pierwszej sekundy po nim,
+daty w dwóch zapisach (`2026-03-05 09:00:00` i `2026-03-05T09:00:00`),
+ponowne otwarcie, brak wpisu w historii, uszkodzony i zdublowany wpis AI.
+Wszystkie oczekiwane liczby policzono ręcznie i opisano w nagłówku pliku.
 
 ### Weryfikacja testów zgodności dokumentacji
 

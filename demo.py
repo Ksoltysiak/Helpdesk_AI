@@ -108,8 +108,12 @@ show(f"Audit trail zgloszenia #{ticket_id}", requests.get(f"{BASE}/tickets/{tick
 section("7. KONTROLA UPRAWNIEN I BEZPIECZENSTWO (TESTY NEGATYWNE)")
 show("Pracownik NIE moze zmienic statusu (403)",
      requests.patch(f"{BASE}/tickets/1", headers=PRACOWNIK, json={"status": "Zamkniete"}), expect=403)
+# Swieze zgloszenie — numery zgloszen z seed.py zaleza od wygenerowanej historii.
+nowe_id = requests.post(f"{BASE}/tickets", headers=PRACOWNIK,
+                        json={"title": "Drukarka", "description": "Brak tonera"}).json().get("id")
 show("Niedozwolone przejscie Nowe -> Zamkniete (400)",
-     requests.patch(f"{BASE}/tickets/2", headers=TECHNIK, json={"status": "Zamkniete"}), expect=400)
+     requests.patch(f"{BASE}/tickets/{nowe_id}", headers=TECHNIK, json={"status": "Zamkniete"}),
+     expect=400)
 show("Brak tokenu (401)", requests.get(f"{BASE}/tickets"), expect=401)
 show("Podrobiony token zostaje odrzucony (401)",
      requests.get(f"{BASE}/tickets", headers=auth("niepoprawny.token.jwt")), expect=401)
@@ -118,6 +122,17 @@ show("Zbyt dlugi tytul zostaje odrzucony (400)",
      json={"title": "x" * 300, "description": "opis"}), expect=400)
 show("Nieznany punkt koncowy API zwraca JSON 404",
      requests.get(f"{BASE}/nieistniejacy"), expect=404)
+
+
+section("8. KLIENCI I RAPORTY")
+show("Lista klientow z liczba zgloszen (technik)", requests.get(f"{BASE}/clients", headers=TECHNIK))
+klient_id = r_prac.json().get("client_id")
+show("Raport klienta za ostatnie 30 dni",
+     requests.get(f"{BASE}/reports?client_id={klient_id}", headers=TECHNIK))
+show("Pracownik NIE ma dostepu do raportow (403)",
+     requests.get(f"{BASE}/reports", headers=PRACOWNIK), expect=403)
+show("Nieprawidlowy okres raportu (400)",
+     requests.get(f"{BASE}/reports?od=2026-13-01", headers=TECHNIK), expect=400)
 
 
 print("\n" + "=" * 64)
