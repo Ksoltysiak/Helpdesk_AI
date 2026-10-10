@@ -38,7 +38,7 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
                     │   E2E — demo.py       │   25 sprawdzeń
                     │   działający serwer   │   ~3 s
                     ├───────────────────────┤
-                │      Integracyjne         │   376 testów
+                │      Integracyjne         │   396 testów
                 │   Flask + baza danych     │   ~11 s
             ├───────────────────────────────────┤
         │          Jednostkowe                  │   142 testy
@@ -119,6 +119,12 @@ ominie izolacji filtrem, nie zobaczy notatek wewnętrznych. Dalej: tworzenie
 zgłoszeń z kategoryzacją AI, walidacja długości pól (z testem wartości
 granicznej), maszyna stanów w praktyce, automatyczne przypisanie technika przy
 podjęciu, ręczna korekta kategorii i przypisania oraz kompletność ścieżki audytu.
+
+**`test_pulpit.py`** — pulpit konsoli IT. Sprawdza, że każdy kafelek pulpitu
+pokazuje tę samą liczbę, co lista zgłoszeń otwarta po kliknięciu w niego, że
+trend ma wszystkie dni okresu (także bez ruchu), że obciążenie zespołu obejmuje
+techników bez zgłoszeń oraz że pracownik nie dostaje obrazu pracy helpdesku
+(SLA, obciążenie), a w kanale aktywności nie widzi notatek ani cudzych zgłoszeń.
 
 **`test_api_security.py`** — nagłówki bezpieczeństwa (również na odpowiedziach
 API), brak CORS z gwiazdką, poprawna obsługa nieznanych ścieżek `/api/*`,

@@ -5,7 +5,7 @@ Dzięki temu widać w jednym miejscu, jakimi zapytaniami system obciąża bazę,
 i łatwiej sprawdzić, że każde filtrowanie respektuje granicę dostępu.
 """
 
-from app.data.database import get_db, czas_utc
+from app.data.database import get_db, czas_utc, teraz_utc
 
 # Nazwiska i nazwa klienta dołączane przez LEFT JOIN — interfejs pokazuje
 # osobę i firmę zamiast surowego identyfikatora.
@@ -52,6 +52,10 @@ def serialize(t):
     return data
 
 
+# Zgłoszenie aktywne to takie, nad którym ktoś jeszcze musi pracować.
+WARUNEK_AKTYWNE = "status NOT IN ('Rozwiazane', 'Zamkniete')"
+
+
 def zbuduj_warunki(user, filtry):
     """Warunki WHERE zależne od roli.
 
@@ -70,6 +74,24 @@ def zbuduj_warunki(user, filtry):
             if wartosc:
                 warunki.append(f"t.{pole} = ?")
                 params.append(wartosc)
+
+        # Skróty z pulpitu konsoli IT. Nieznana wartość skrótu jest pomijana —
+        # filtr ma zawężać listę, a nie zgłaszać błędów.
+        przypisane = filtry.get("przypisane")
+        if przypisane == "ja":
+            warunki.append("t.assigned_to = ?")
+            params.append(user["id"])
+        elif przypisane == "brak":
+            warunki.append("t.assigned_to IS NULL")
+
+        if filtry.get("sla") == "przekroczone":
+            warunki.append(f"t.{WARUNEK_AKTYWNE} AND julianday(t.sla_deadline) < julianday(?)")
+            params.append(teraz_utc())
+
+    # Wspólny dla obu ról: tylko zawęża listę, więc nie narusza izolacji
+    # pracownika (jego warunek autora jest już na liście).
+    if filtry.get("aktywne") == "1":
+        warunki.append(f"t.{WARUNEK_AKTYWNE}")
 
     where = (" WHERE " + " AND ".join(warunki)) if warunki else ""
     return where, params

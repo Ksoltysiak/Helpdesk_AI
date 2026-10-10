@@ -18,7 +18,7 @@ priorytetu zgłoszenia
   z rekomendacjami.
 - Ocena zgłoszeń: **94,4% trafności** na zbiorze kontrolnym, **5 z 5**
   incydentów bezpieczeństwa rozpoznanych jako krytyczne.
-- Jakość: **543 testy automatyczne**, 100% pokrycia kodu, cały system
+- Jakość: **563 testy automatyczne**, 100% pokrycia kodu, cały system
   uruchamiany jednym poleceniem (Docker).
 
 ## Spis treści
@@ -81,6 +81,26 @@ temu można później przygotować zestawienie dla konkretnego klienta.
 | **Pracownik** (firmy-klienta) | Zakłada zgłoszenia; widzi **wyłącznie własne** zgłoszenia i komentarze oznaczone jako jawne |
 | **Technik** (helpdesk) | Widzi i filtruje wszystkie zgłoszenia, także według klienta; przegląda listę klientów i tworzy dla nich raporty; zmienia status, kategorię i przypisanie; dodaje komentarze (wewnętrzne lub jawne); przegląda historię zmian |
 | **Administrator** | Uprawnienia technika |
+
+### Pulpit na żywo
+
+Pulpit odświeża się sam co 30 sekund (można to wstrzymać), a liczniki czasu
+odliczają na bieżąco. **Technik** widzi na nim:
+
+| Element | Co pokazuje |
+|---|---|
+| Kafelki | Aktywne, nieprzypisane, po terminie SLA, zagrożone SLA (termin w ciągu 2 h), krytyczne, moje, do zamknięcia — kliknięcie otwiera listę z gotowym filtrem |
+| Ruch w zgłoszeniach | Nowe i zamknięte zgłoszenia w ostatnich 14 dniach |
+| Kolejka wg priorytetu | Wykres kołowy aktywnych zgłoszeń |
+| Pilnuj SLA | Zgłoszenia najbliżej terminu lub po nim, z odliczaniem czasu |
+| Ostatnia aktywność | Najnowsze wpisy ścieżki audytu; o nowym zgłoszeniu technik dostaje powiadomienie |
+| Obciążenie zespołu | Liczba aktywnych zgłoszeń na technika |
+| Moduł AI | Skuteczność liczona z ręcznych korekt techników |
+
+**Pracownik** widzi swoje sprawy w toku z paskiem postępu (Nowe → W trakcie →
+Rozwiązane → Zamknięte) i czasem pozostałym do terminu SLA, zmiany w swoich
+zgłoszeniach oraz gotowe szablony typowych problemów. W formularzu zgłoszenia
+moduł AI już w trakcie pisania podpowiada kategorię i priorytet.
 
 ### Raporty dla klientów
 
@@ -228,7 +248,7 @@ Pełny audyt (20 punktów kontrolnych): [`SECURITY.md`](SECURITY.md).
 
 | Rodzaj testów | Liczba | Co sprawdzają |
 |---------------|--------|---------------|
-| Jednostkowe i integracyjne | 518 | Moduł AI, cykl życia, API, uprawnienia, klientów, raporty, walidację danych |
+| Jednostkowe i integracyjne | 538 | Moduł AI, cykl życia, API, uprawnienia, klientów, raporty, walidację danych |
 | Kompletny przepływ (E2E) | 25 | Działający serwer — od logowania do zamknięcia zgłoszenia i raportu |
 
 - **Pokrycie kodu: 100%.**
@@ -285,7 +305,7 @@ Testy: `py -m pytest`. Konfiguracja i rozwiązywanie problemów:
 | Wydajność | Lista zgłoszeń 51× szybsza, odpowiedź 399× mniejsza |
 | Bezpieczeństwo | Audyt 20-punktowy; usunięto m.in. możliwość podszycia się i 15 podatności |
 | Raporty | Raport klienta w 5–20 ms przy 100 000 zgłoszeń; 0 błędów w testach losowych i równoległych |
-| Jakość | 543 testy automatyczne, 100% pokrycia kodu |
+| Jakość | 563 testy automatyczne, 100% pokrycia kodu |
 | Wdrożenie | Cały system uruchamiany jednym poleceniem, sprawdzany w CI |
 
 ### Ograniczenia
