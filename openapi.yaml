@@ -205,7 +205,7 @@ paths:
   /dashboard:
     get:
       tags: [Pulpit i AI]
-      summary: Statystyki i rozkład kategorii
+      summary: Dane pulpitu — statystyki, SLA, trend i aktywność
       description: |
         **Zakres zależy od roli**, tak samo jak lista zgłoszeń:
 
@@ -251,6 +251,68 @@ paths:
                       properties:
                         kategoria: { $ref: "#/components/schemas/Kategoria" }
                         liczba: { type: integer, example: 4 }
+                  aktywnosc:
+                    type: array
+                    description: |
+                      Najnowsze wpisy ścieżki audytu (do 12), od najświeższego.
+                      Pracownik widzi tylko utworzenie i zmiany statusu własnych zgłoszeń.
+                    items:
+                      type: object
+                      required: [ticket_id, title, action, old, new, user, timestamp]
+                      properties:
+                        ticket_id: { type: integer, example: 12 }
+                        title: { type: string, example: Nie dziala VPN }
+                        action: { type: string, example: Zmiana statusu }
+                        old: { type: string, nullable: true, example: Nowe }
+                        new: { type: string, nullable: true, example: W trakcie }
+                        user: { type: string, example: Marek Lewandowski }
+                        timestamp: { type: string, format: date-time }
+                  puls:
+                    type: object
+                    description: Tylko technik/admin — stan kolejki „teraz"
+                    properties:
+                      po_terminie: { type: integer, description: Aktywne po terminie SLA, example: 3 }
+                      zagrozone: { type: integer, description: Termin SLA w ciągu 2 h, example: 1 }
+                      nieprzypisane: { type: integer, example: 4 }
+                      moje: { type: integer, description: Aktywne przypisane do zalogowanego, example: 2 }
+                      dzis_nowe: { type: integer, example: 6 }
+                      dzis_zamkniete: { type: integer, example: 3 }
+                  trend:
+                    type: array
+                    description: Tylko technik/admin — nowe i zamknięte w ostatnich 14 dniach (UTC), także dni bez ruchu
+                    items:
+                      type: object
+                      properties:
+                        data: { type: string, format: date }
+                        nowe: { type: integer }
+                        zamkniete: { type: integer }
+                  wg_priorytetu:
+                    type: object
+                    description: Tylko technik/admin — aktywne zgłoszenia wg priorytetu
+                    additionalProperties: { type: integer }
+                    example: { Krytyczny: 1, Wysoki: 4, Sredni: 6, Niski: 2 }
+                  pilne_sla:
+                    type: array
+                    description: Tylko technik/admin — do 6 aktywnych zgłoszeń najbliżej terminu SLA lub po nim
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        title: { type: string }
+                        priority: { $ref: "#/components/schemas/Priorytet" }
+                        status: { $ref: "#/components/schemas/Status" }
+                        sla_deadline: { type: string, format: date-time }
+                        assigned_to_name: { type: string, nullable: true }
+                  obciazenie:
+                    type: array
+                    description: Tylko technik/admin — aktywne zgłoszenia na osobę z personelu
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        aktywne: { type: integer }
+                        krytyczne: { type: integer }
         "401":
           $ref: "#/components/responses/BrakAutoryzacji"
 
@@ -263,8 +325,8 @@ paths:
         Zakres wyników zależy od roli:
 
         - **pracownik** — wyłącznie zgłoszenia, których jest autorem;
-          parametry filtrowania są dla niego ignorowane i **nie pozwalają**
-          dosięgnąć cudzych zgłoszeń,
+          parametry filtrowania (poza `aktywne`) są dla niego ignorowane
+          i **nie pozwalają** dosięgnąć cudzych zgłoszeń,
         - **technik / admin** — wszystkie zgłoszenia, z opcjonalnym filtrowaniem.
 
         **Wyniki są stronicowane.** Domyślnie zwracane jest 50 zgłoszeń na
@@ -290,6 +352,22 @@ paths:
           in: query
           description: Tylko technik/admin — zgłoszenia jednego klienta
           schema: { type: integer, example: 2 }
+        - name: przypisane
+          in: query
+          description: |
+            Tylko technik/admin. `ja` — przypisane do zalogowanego,
+            `brak` — bez opiekuna. Inna wartość jest pomijana.
+          schema: { type: string, enum: [ja, brak] }
+        - name: sla
+          in: query
+          description: Tylko technik/admin. `przekroczone` — aktywne zgłoszenia po terminie SLA
+          schema: { type: string, enum: [przekroczone] }
+        - name: aktywne
+          in: query
+          description: |
+            `1` — tylko zgłoszenia w obsłudze (bez rozwiązanych i zamkniętych).
+            Działa dla każdej roli — zawęża listę, więc nie narusza izolacji pracownika.
+          schema: { type: string, enum: ["1"] }
         - name: page
           in: query
           description: Numer strony, liczony od 1

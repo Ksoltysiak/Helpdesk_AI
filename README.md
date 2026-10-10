@@ -167,8 +167,8 @@ py wsgi.py                    # startuje serwer na http://127.0.0.1:5000
 
 ## Testy
 
-Projekt ma zestaw **543 automatycznych sprawdzeń** w trzech warstwach
-(518 testów `pytest` + 25 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
+Projekt ma zestaw **563 automatycznych sprawdzeń** w trzech warstwach
+(538 testów `pytest` + 25 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
 
 ```bash
 py -m pip install -r requirements-dev.txt
@@ -178,7 +178,7 @@ py -m pytest
 | Warstwa | Liczba | Zakres |
 |---|---|---|
 | Jednostkowe | 142 | Kategoryzacja AI i jej skuteczność, reguły raportów, tokeny JWT, maszyna stanów |
-| Integracyjne | 376 | Flask + baza: RBAC, klienci, raporty, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
+| Integracyjne | 396 | Flask + baza: RBAC, klienci, raporty, pulpit, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
 | E2E (`demo.py`) | 25 | Pełny przepływ przez działający serwer |
 
 Testy uruchamiają się automatycznie przy każdym pull requeście
@@ -355,7 +355,7 @@ orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
 | GET    | `/api/health`              | —             | Kontrola zdrowia (dla load balancera)       |
 | POST   | `/api/auth/login`          | —             | Logowanie — zwraca JWT token                |
 | GET    | `/api/auth/me`             | każdy         | Dane zalogowanego użytkownika (odtworzenie sesji) |
-| GET    | `/api/dashboard`           | każdy         | Statystyki + rozkład kategorii              |
+| GET    | `/api/dashboard`           | każdy         | Pulpit: statystyki, SLA, trend, aktywność   |
 | GET    | `/api/tickets`             | każdy         | Lista zgłoszeń (filtrowana wg roli)         |
 | POST   | `/api/tickets`             | pracownik     | Nowe zgłoszenie + kategoryzacja AI          |
 | GET    | `/api/tickets/{id}`        | każdy         | Szczegóły zgłoszenia + notatki              |

@@ -13,6 +13,8 @@ let state = {
   filterStatus: '',
   filterPriority: '',
   filterClient: '',
+  filterCategory: '',
+  filterSkrot: '',      // skrót z pulpitu: aktywne / nieprzypisane / moje / po_terminie
   klienci: null,        // lista klientów do filtra — pobierana raz na sesję
   raport: { klient: '', zakres: '30', od: '', do: '' },   // ostatnie ustawienia raportu
   ostatniRaport: null,
@@ -103,6 +105,9 @@ function doLogout() {
   state.clientName = null; state.klienci = null; state.ostatniRaport = null;
   state.raport = { klient: '', zakres: '30', od: '', do: '' };
   state.filterStatus = ''; state.filterPriority = ''; state.filterClient = ''; state.page = 1;
+  state.filterCategory = ''; state.filterSkrot = '';
+  zatrzymajOdswiezanie();
+  pulpit.poprzednie = null; pulpit.znaneWpisy = null; pulpit.zakladka = 'najnowsze';
   sessionStorage.removeItem('helpdesk_token');
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('app').classList.remove('visible');
@@ -172,6 +177,7 @@ function navigate(view) {
   // Zmiana widoku zawsze zaczyna od pierwszej strony.
   if (state.currentView !== view) state.page = 1;
   state.currentView = view;
+  if (view === 'dashboard') uruchomOdswiezanie(); else zatrzymajOdswiezanie();
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', el.dataset.view === view)
   );
@@ -244,102 +250,608 @@ function spinner() {
 // ============================================================
 // DASHBOARD
 // ============================================================
-async function renderDashboard() {
+// Pulpit odświeża się sam, dopóki jest na ekranie. Karta w tle nie odpytuje
+// serwera — dane doczytują się od razu, gdy użytkownik do niej wróci.
+const ODSWIEZANIE_MS = 30000;
+
+const pulpit = {
+  timer: null,
+  auto: (() => { try { return localStorage.getItem('helpdesk_auto') !== '0'; } catch { return true; } })(),
+  poprzednie: null,     // liczniki z poprzedniego odświeżenia — do pokazania zmian
+  znaneWpisy: null,     // klucze wpisów aktywności — nowe dostają wyróżnienie
+  zakladka: 'najnowsze',
+};
+
+const ZAKLADKI_PULPITU = {
+  najnowsze:     { nazwa: 'Najnowsze',     query: '' },
+  nieprzypisane: { nazwa: 'Nieprzypisane', query: '&przypisane=brak&aktywne=1' },
+  moje:          { nazwa: 'Moje',          query: '&przypisane=ja&aktywne=1' },
+  krytyczne:     { nazwa: 'Krytyczne',     query: '&priority=Krytyczny&aktywne=1' },
+  sla:           { nazwa: 'Po terminie',   query: '&sla=przekroczone' },
+};
+
+const KATEGORIE_PL = {
+  'Sprzet': 'Sprzęt', 'Siec': 'Sieć', 'Konta i dostep': 'Konta i dostęp',
+  'Bezpieczenstwo': 'Bezpieczeństwo',
+};
+const kategoriaPL = k => KATEGORIE_PL[k] || k;
+
+const BEZ_ANIMACJI = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function uruchomOdswiezanie() {
+  zatrzymajOdswiezanie();
+  if (!pulpit.auto) return;
+  pulpit.timer = setInterval(() => {
+    const modalOtwarty = document.getElementById('ticketModal').classList.contains('open');
+    if (!document.hidden && !modalOtwarty && state.currentView === 'dashboard') renderDashboard(true);
+  }, ODSWIEZANIE_MS);
+}
+
+function zatrzymajOdswiezanie() {
+  clearInterval(pulpit.timer);
+  pulpit.timer = null;
+}
+
+function przelaczAuto() {
+  pulpit.auto = !pulpit.auto;
+  try { localStorage.setItem('helpdesk_auto', pulpit.auto ? '1' : '0'); } catch { /* tryb prywatny */ }
+  uruchomOdswiezanie();
+  renderDashboard(true);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.token && state.currentView === 'dashboard' && pulpit.auto) renderDashboard(true);
+});
+
+// Kliknięcie w kafelek albo wykres prowadzi do listy z gotowym filtrem.
+function przejdzDoListy(f) {
+  state.filterStatus = f.status || '';
+  state.filterPriority = f.priority || '';
+  state.filterCategory = f.category || '';
+  state.filterClient = '';
+  state.filterSkrot = f.skrot || '';
+  state.page = 1;
+  navigate('all-tickets');
+}
+
+function linkListy(f) {
+  return `przejdzDoListy(${escHtml(JSON.stringify(f))})`;
+}
+
+async function renderDashboard(odswiezenie = false) {
   const c = document.getElementById('mainContent');
   const isTechnik = state.role === 'technik' || state.role === 'admin';
   try {
-    if (isTechnik) {
-      const [dash, ticketData] = await Promise.all([
-        apiFetch('/dashboard'),
-        apiFetch('/tickets?per_page=6'),   // pulpit pokazuje tylko ostatnie
-      ]);
-      const s = dash.statystyki;
-      const recent = ticketData.tickets;
-      c.innerHTML = `
-        <div style="margin-bottom:1.5rem">
-          <h2 style="font-size:var(--text-lg);font-weight:700;margin-bottom:0.25rem">Konsola Obsługi IT</h2>
-          <p style="color:var(--color-text-muted);font-size:var(--text-sm)">Dzisiaj: ${new Date().toLocaleDateString('pl-PL',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>
-        </div>
-        <div class="kpi-grid">
-          <div class="card kpi-card">
-            <div class="kpi-label">Otwarte</div>
-            <div class="kpi-value" style="color:var(--color-blue)">${s.otwarte}</div>
-            <div class="kpi-sub"><span class="kpi-dot" style="background:var(--color-blue)"></span>aktywne zgłoszenia</div>
-          </div>
-          <div class="card kpi-card">
-            <div class="kpi-label">W trakcie</div>
-            <div class="kpi-value" style="color:var(--color-primary)">${s.w_trakcie}</div>
-            <div class="kpi-sub"><span class="kpi-dot" style="background:var(--color-primary)"></span>w toku obsługi</div>
-          </div>
-          <div class="card kpi-card">
-            <div class="kpi-label">Krytyczne</div>
-            <div class="kpi-value" style="color:var(--color-error)">${s.krytyczne}</div>
-            <div class="kpi-sub"><span class="kpi-dot" style="background:var(--color-error)"></span>wymagają uwagi</div>
-          </div>
-          <div class="card kpi-card">
-            <div class="kpi-label">Rozwiązane</div>
-            <div class="kpi-value" style="color:var(--color-success)">${s.rozwiazane}</div>
-            <div class="kpi-sub"><span class="kpi-dot" style="background:var(--color-success)"></span>do zamknięcia</div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="section-header">
-            <div class="section-title">Ostatnie zgłoszenia</div>
-            <button class="btn btn-sm btn-secondary" onclick="navigate('all-tickets')">Wszystkie zgłoszenia</button>
-          </div>
-          ${recent.length ? renderTicketTable(recent, true) : emptyState('Brak zgłoszeń w systemie.')}
-        </div>`;
-    } else {
-      // Liczniki pochodzą z backendu (zakres: własne zgłoszenia pracownika).
-      // Liczenie ich z pobranej listy dawałoby błędne wyniki, bo lista jest
-      // stronicowana i zawiera tylko pierwszą stronę.
-      const [dash, ticketData] = await Promise.all([
-        apiFetch('/dashboard'),
-        apiFetch('/tickets?per_page=5'),
-      ]);
-      const tickets  = ticketData.tickets;
-      const myOpen   = dash.statystyki.otwarte;
-      const myClosed = dash.statystyki.zamkniete;
-      const myTotal  = dash.statystyki.wszystkie;
-      c.innerHTML = `
-        <div style="margin-bottom:1.5rem">
-          <h2 style="font-size:var(--text-lg);font-weight:700;margin-bottom:0.25rem">Witaj, ${escHtml(state.user.split(' ')[0])}! 👋</h2>
-          <p style="color:var(--color-text-muted);font-size:var(--text-sm)">${state.clientName ? escHtml(state.clientName) + ' · ' : ''}Zarządzaj swoimi zgłoszeniami IT</p>
-        </div>
-        <div class="kpi-grid">
-          <div class="card kpi-card">
-            <div class="kpi-label">Moje otwarte</div>
-            <div class="kpi-value" style="color:var(--color-primary)">${myOpen}</div>
-            <div class="kpi-sub">aktywne zgłoszenia</div>
-          </div>
-          <div class="card kpi-card">
-            <div class="kpi-label">Zamknięte</div>
-            <div class="kpi-value" style="color:var(--color-success)">${myClosed}</div>
-            <div class="kpi-sub">rozwiązane sprawy</div>
-          </div>
-          <div class="card kpi-card">
-            <div class="kpi-label">Łącznie</div>
-            <div class="kpi-value">${myTotal}</div>
-            <div class="kpi-sub">wszystkich zgłoszeń</div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="section-header">
-            <div class="section-title">Ostatnie zgłoszenia</div>
-            <button class="btn btn-sm btn-secondary" onclick="navigate('my-tickets')">Zobacz wszystkie</button>
-          </div>
-          ${tickets.length
-            ? renderTicketTable(tickets, false)
-            : `<div class="empty-state">
-                <div class="empty-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
-                <p>Nie masz jeszcze żadnych zgłoszeń.<br>Kliknij „Nowe zgłoszenie" aby zacząć.</p>
-                <button class="btn btn-primary" style="margin-top:1rem" onclick="navigate('new-ticket')">Nowe zgłoszenie</button>
-              </div>`}
-        </div>`;
-    }
+    if (isTechnik) await pulpitTechnika(c, odswiezenie);
+    else await pulpitPracownika(c, odswiezenie);
   } catch (e) {
+    // Chwilowy błąd przy odświeżeniu nie kasuje pulpitu — pokazujemy go w pasku.
+    const pasek = document.getElementById('liveStatus');
+    if (odswiezenie && pasek) { pasek.textContent = 'Brak połączenia — ponowię próbę'; return; }
     c.innerHTML = errorCard(e.message || 'Błąd ładowania danych.');
   }
+}
+
+// --- Pasek „na żywo" ------------------------------------------------------
+function pasekNaZywo() {
+  return `
+    <div class="live-bar">
+      <span class="live-dot ${pulpit.auto ? 'on' : ''}"></span>
+      <span id="liveStatus">${pulpit.auto ? 'Na żywo' : 'Wstrzymano'} · aktualizacja
+        <span data-od="${new Date().toISOString()}">przed chwilą</span></span>
+      <button class="btn btn-sm btn-secondary" onclick="przelaczAuto()"
+              title="${pulpit.auto ? 'Wstrzymaj' : 'Wznów'} automatyczne odświeżanie co ${ODSWIEZANIE_MS / 1000} s">
+        ${pulpit.auto ? 'Pauza' : 'Wznów'}</button>
+      <button class="icon-btn" onclick="renderDashboard(true)" title="Odśwież teraz" aria-label="Odśwież teraz">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      </button>
+    </div>`;
+}
+
+// --- Kafelki ---------------------------------------------------------------
+function kafelki(lista, odswiezenie) {
+  const poprzednie = pulpit.poprzednie || {};
+  const html = lista.map(k => {
+    const przed = poprzednie[k.klucz];
+    const roznica = odswiezenie && przed !== undefined ? k.wartosc - przed : 0;
+    const akcja = k.filtr ? linkListy(k.filtr) : (k.akcja || '');
+    return `
+      <${akcja ? 'button type="button"' : 'div'} class="card kpi-card ${akcja ? 'kpi-link' : ''} ${k.alarm ? 'kpi-alarm' : ''} ${roznica ? 'kpi-zmiana' : ''}"
+           ${akcja ? `onclick="${akcja}"` : ''} title="${escHtml(k.tytul || '')}">
+        <div class="kpi-label">${k.etykieta}</div>
+        <div class="kpi-value" style="color:${k.kolor || 'inherit'}" data-licznik="${k.wartosc}">${odswiezenie ? k.wartosc : 0}</div>
+        <div class="kpi-sub"><span class="kpi-dot" style="background:${k.kolor || 'var(--color-text-muted)'}"></span>${k.podpis}
+          ${roznica ? `<span class="kpi-delta ${roznica > 0 ? 'delta-up' : 'delta-down'}">${roznica > 0 ? '+' : '−'}${Math.abs(roznica)}</span>` : ''}</div>
+      </${akcja ? 'button' : 'div'}>`;
+  }).join('');
+  pulpit.poprzednie = Object.fromEntries(lista.map(k => [k.klucz, k.wartosc]));
+  return `<div class="kpi-grid kpi-grid-pulpit">${html}</div>`;
+}
+
+// Liczniki „dobiegają" do wartości tylko przy pierwszym wejściu na pulpit —
+// przy cichym odświeżeniu animacja co 30 s byłaby męcząca.
+function animujLiczniki(korzen) {
+  const el = korzen.querySelectorAll('[data-licznik]');
+  if (BEZ_ANIMACJI) { el.forEach(e => { e.textContent = e.dataset.licznik; }); return; }
+  const start = performance.now(), CZAS = 700;
+  const krok = t => {
+    const p = Math.min(1, (t - start) / CZAS), e = 1 - Math.pow(1 - p, 3);
+    el.forEach(x => { x.textContent = Math.round(+x.dataset.licznik * e); });
+    if (p < 1) requestAnimationFrame(krok);
+  };
+  requestAnimationFrame(krok);
+}
+
+// --- Czas: odliczanie SLA i „x minut temu" ---------------------------------
+function czasTrwania(ms) {
+  const s = Math.floor(ms / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  if (d >= 1) return `${d} d ${h % 24} h`;
+  if (h >= 1) return `${h} h ${String(m % 60).padStart(2, '0')} min`;
+  return `${m} min ${String(s % 60).padStart(2, '0')} s`;
+}
+
+function odliczanie(iso) {
+  const roznica = new Date(iso) - Date.now();
+  return roznica < 0 ? `po terminie ${czasTrwania(-roznica)}` : `zostało ${czasTrwania(roznica)}`;
+}
+
+function ileTemu(iso) {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso)) / 1000));
+  if (s < 10) return 'przed chwilą';
+  if (s < 60) return `${s} s temu`;
+  if (s < 3600) return `${Math.floor(s / 60)} min temu`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h temu`;
+  const dni = Math.floor(s / 86400);
+  if (dni === 1) return 'wczoraj';
+  if (dni < 7) return `${dni} dni temu`;
+  return formatDate(iso);
+}
+
+// Jeden zegar dla całej strony aktualizuje wszystkie liczniki czasu.
+setInterval(() => {
+  document.querySelectorAll('[data-termin]').forEach(el => {
+    el.textContent = odliczanie(el.dataset.termin);
+    el.classList.toggle('sla-po', new Date(el.dataset.termin) < Date.now());
+  });
+  document.querySelectorAll('[data-od]').forEach(el => { el.textContent = ileTemu(el.dataset.od); });
+}, 1000);
+
+function licznikSla(iso) {
+  if (!iso) return '';
+  const po = new Date(iso) < Date.now();
+  return `<span class="sla-timer ${po ? 'sla-po' : ''}" data-termin="${iso}">${odliczanie(iso)}</span>`;
+}
+
+// --- Wykresy ----------------------------------------------------------------
+function szerokoscWykresu(udzial) {
+  const obszar = document.getElementById('mainContent');
+  const dostepne = (obszar ? obszar.clientWidth : 700) - 48;
+  return Math.round(Math.min(900, Math.max(280, dostepne > 900 ? dostepne * udzial - 40 : dostepne - 40)));
+}
+
+function wykresRuchu(trend, animuj) {
+  const W = szerokoscWykresu(2 / 3), H = 240, L = 28, P = 6, G = 8, D = 24;
+  const n = trend.length;
+  const max = Math.max(1, ...trend.map(t => Math.max(t.nowe, t.zamkniete)));
+  const krok = (W - L - P) / n, szer = Math.max(2, krok * 0.34);
+  const y = v => G + (H - G - D) * (1 - v / max);
+  const wys = v => (H - G - D) * (v / max);
+  const co = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(W / 60))));
+
+  const siatka = [0, Math.round(max / 2), max].filter((v, i, a) => a.indexOf(v) === i).map(v => `
+    <line class="trend-grid" x1="${L}" x2="${W - P}" y1="${y(v)}" y2="${y(v)}"/>
+    <text class="trend-label" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`).join('');
+
+  const slupki = trend.map((t, i) => {
+    const x = L + krok * i + krok / 2;
+    const dzien = formatDzien(t.data);
+    return `
+      <g class="trend-dzien" style="--i:${i}">
+        <rect class="bar-nowe" x="${x - szer - 1}" y="${H - D - wys(t.nowe)}" width="${szer}" height="${wys(t.nowe)}" rx="1.5"/>
+        <rect class="bar-zamk" x="${x + 1}" y="${H - D - wys(t.zamkniete)}" width="${szer}" height="${wys(t.zamkniete)}" rx="1.5"/>
+        <rect x="${L + krok * i}" y="${G}" width="${krok}" height="${H - G - D}" fill="transparent">
+          <title>${dzien}: ${t.nowe} nowych, ${t.zamkniete} zamkniętych</title></rect>
+        ${(i % co === 0 || i === n - 1) && !(i !== n - 1 && n - 1 - i < co / 2)
+          ? `<text class="trend-label" x="${x}" y="${H - 6}" text-anchor="middle">${dzien.slice(0, 5)}</text>` : ''}
+      </g>`;
+  }).join('');
+
+  const nowe = trend.reduce((s, t) => s + t.nowe, 0), zamk = trend.reduce((s, t) => s + t.zamkniete, 0);
+  return `
+    <svg class="trend-chart ${animuj && !BEZ_ANIMACJI ? 'anim' : ''}" viewBox="0 0 ${W} ${H}" role="img"
+         aria-label="Ostatnie ${n} dni: ${nowe} nowych i ${zamk} zamkniętych zgłoszeń">${siatka}${slupki}</svg>
+    <div class="chart-legend">
+      <span><span class="legend-swatch"></span>nowe (${nowe})</span>
+      <span><span class="legend-swatch" style="background:var(--color-success)"></span>zamknięte (${zamk})</span>
+    </div>`;
+}
+
+const PRIORYTETY = ['Krytyczny', 'Wysoki', 'Sredni', 'Niski'];
+
+function donutPriorytetow(wg) {
+  const razem = PRIORYTETY.reduce((s, p) => s + (wg[p] || 0), 0);
+  if (!razem) return emptyState('Brak aktywnych zgłoszeń — kolejka jest pusta.');
+  const R = 42, O = 2 * Math.PI * R, przerwa = PRIORYTETY.filter(p => wg[p]).length > 1 ? 1.5 : 0;
+  let przesuniecie = 0;
+  const luki = PRIORYTETY.filter(p => wg[p]).map(p => {
+    const dl = wg[p] / razem * O;
+    const luk = `<circle class="donut-luk" r="${R}" cx="60" cy="60" stroke="${KOLORY_PRIORYTETOW[p]}"
+      stroke-dasharray="${Math.max(0.5, dl - przerwa)} ${O - dl + przerwa}" stroke-dashoffset="${-przesuniecie}"
+      onclick="${linkListy({ priority: p, skrot: 'aktywne' })}"><title>${p}: ${wg[p]}</title></circle>`;
+    przesuniecie += dl;
+    return luk;
+  }).join('');
+  const legenda = PRIORYTETY.map(p => `
+    <button type="button" class="donut-row" onclick="${linkListy({ priority: p, skrot: 'aktywne' })}">
+      ${priorityBadge(p)}<span class="donut-num">${wg[p] || 0}</span>
+      <small>${Math.round((wg[p] || 0) / razem * 100)}%</small>
+    </button>`).join('');
+  return `
+    <div class="donut-wrap">
+      <svg class="donut" viewBox="0 0 120 120" role="img" aria-label="Aktywne zgłoszenia wg priorytetu, razem ${razem}">
+        <g transform="rotate(-90 60 60)">
+          <circle r="${R}" cx="60" cy="60" fill="none" stroke="var(--color-surface-offset)" stroke-width="16"/>${luki}
+        </g>
+        <text x="60" y="60" class="donut-value" text-anchor="middle">${razem}</text>
+        <text x="60" y="76" class="donut-label" text-anchor="middle">aktywnych</text>
+      </svg>
+      <div class="donut-legend">${legenda}</div>
+    </div>`;
+}
+
+function slupkiKategorii(wiersze) {
+  if (!wiersze.length) return emptyState('Brak zgłoszeń.');
+  const max = wiersze[0].liczba;
+  return wiersze.map(w => `
+    <button type="button" class="bar-row bar-link" onclick="${linkListy({ category: w.kategoria })}"
+            title="Pokaż zgłoszenia: ${escHtml(kategoriaPL(w.kategoria))}">
+      <div class="bar-label">${escHtml(kategoriaPL(w.kategoria))}</div>
+      <div class="bar-track"><div class="bar-fill grow" style="width:${w.liczba / max * 100}%"></div></div>
+      <div class="bar-value">${w.liczba}</div>
+    </button>`).join('');
+}
+
+function obciazenieZespolu(osoby) {
+  if (!osoby.length) return emptyState('Brak techników w systemie.');
+  const max = Math.max(1, ...osoby.map(o => o.aktywne));
+  return osoby.map(o => {
+    const ja = o.id === state.userId;
+    const kolor = o.aktywne >= 5 ? 'var(--color-error)' : o.aktywne >= 3 ? 'var(--color-orange)' : 'var(--color-success)';
+    return `
+      <div class="bar-row bar-row-osoba ${ja ? 'bar-link' : ''}" ${ja ? `onclick="${linkListy({ skrot: 'moje' })}" style="cursor:pointer"` : ''}>
+        <div class="bar-label"><span class="avatar-mini">${escHtml(o.name.split(' ').map(x => x[0]).join('').slice(0, 2))}</span>
+          ${escHtml(o.name)}${ja ? ' <small>(Ty)</small>' : ''}</div>
+        <div class="bar-track">${o.aktywne ? `<div class="bar-fill grow" style="width:${o.aktywne / max * 100}%;background:${kolor}"></div>` : ''}</div>
+        <div class="bar-value">${o.aktywne} ${o.krytyczne ? `<small style="color:var(--color-error)" title="w tym krytyczne">⚑${o.krytyczne}</small>` : ''}</div>
+      </div>`;
+  }).join('');
+}
+
+// --- Kanał aktywności -------------------------------------------------------
+const IKONY_AKCJI = {
+  'Utworzenie':       ['+', 'var(--color-blue)'],
+  'Zmiana statusu':   ['→', 'var(--color-primary)'],
+  'Kategoryzacja AI': ['AI', 'var(--color-orange)'],
+  'Zmiana kategorii': ['#', 'var(--color-warning)'],
+  'Przypisanie':      ['@', 'var(--color-success)'],
+  'Notatka':          ['✎', 'var(--color-text-muted)'],
+};
+
+function opisAkcji(a) {
+  switch (a.action) {
+    case 'Utworzenie': return a.ai ? `nowe zgłoszenie <span class="badge badge-ai">AI</span> ${opisAkcji(a.ai)}` : 'nowe zgłoszenie';
+    case 'Zmiana statusu': return `${statusLabel(a.old)} → <b>${statusLabel(a.new)}</b>`;
+    case 'Zmiana kategorii': return `kategoria ${escHtml(kategoriaPL(a.old || '—'))} → <b>${escHtml(kategoriaPL(a.new))}</b>`;
+    case 'Przypisanie': return 'zmiana przypisania';
+    case 'Notatka': return `notatka: „${escHtml(a.new)}”`;
+    case 'Kategoryzacja AI':
+      try {
+        const w = JSON.parse(a.new);
+        return `${escHtml(kategoriaPL(w.kategoria))} · ${escHtml(w.priorytet)} <small>(${Math.round(w.pewnosc * 100)}%)</small>`;
+      } catch { return 'kategoryzacja'; }
+    default: return escHtml(a.action);
+  }
+}
+
+function kluczWpisu(a) { return `${a.timestamp}|${a.ticket_id}|${a.action}|${a.new}`; }
+
+// Utworzenie zgłoszenia i jego kategoryzacja przez AI dzieją się w tej samej
+// chwili — w kanale pokazujemy je jako jedno zdarzenie zamiast dwóch.
+function scalWpisy(wpisy) {
+  const ai = new Map(wpisy.filter(a => a.action === 'Kategoryzacja AI').map(a => [a.ticket_id, a]));
+  const zUtworzeniem = new Set(wpisy.filter(a => a.action === 'Utworzenie').map(a => a.ticket_id));
+  return wpisy
+    .filter(a => !(a.action === 'Kategoryzacja AI' && zUtworzeniem.has(a.ticket_id)))
+    .map(a => a.action === 'Utworzenie' && ai.has(a.ticket_id) ? { ...a, ai: ai.get(a.ticket_id) } : a);
+}
+
+function kanalAktywnosci(wpisyZBazy, odswiezenie) {
+  const wpisy = scalWpisy(wpisyZBazy);
+  const znane = pulpit.znaneWpisy;
+  const nowe = odswiezenie && znane ? wpisy.filter(a => !znane.has(kluczWpisu(a))) : [];
+  pulpit.znaneWpisy = new Set(wpisy.map(kluczWpisu));
+
+  // Technik dostaje powiadomienie o każdym nowym zgłoszeniu, które wpadło od ostatniego odświeżenia.
+  if (state.role !== 'pracownik') {
+    nowe.filter(a => a.action === 'Utworzenie').forEach(a => pokazPowiadomienie(`Nowe zgłoszenie #${a.ticket_id}: ${a.title}`, a.ticket_id));
+  }
+  if (!wpisy.length) return emptyState('Jeszcze nic się nie wydarzyło.');
+  return `<ul class="feed">${wpisy.map(a => {
+    const [ikona, kolor] = IKONY_AKCJI[a.action] || ['•', 'var(--color-text-muted)'];
+    return `
+      <li class="feed-item ${nowe.includes(a) ? 'feed-nowy' : ''}" onclick="openTicket(${a.ticket_id})">
+        <span class="feed-icon" style="color:${kolor};background:color-mix(in srgb, ${kolor} 14%, transparent)">${ikona}</span>
+        <div class="feed-body">
+          <div class="feed-title"><span class="td-id">#${a.ticket_id}</span> ${escHtml(a.title)}</div>
+          <div class="feed-meta"><b>${escHtml(a.user)}</b> · ${opisAkcji(a)}</div>
+        </div>
+        <span class="feed-time" data-od="${a.timestamp}">${ileTemu(a.timestamp)}</span>
+      </li>`;
+  }).join('')}</ul>`;
+}
+
+function pokazPowiadomienie(tekst, ticketId) {
+  let box = document.getElementById('toasty');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'toasty';
+    box.className = 'toasty';
+    box.setAttribute('aria-live', 'polite');
+    document.body.appendChild(box);
+  }
+  const t = document.createElement('button');
+  t.type = 'button';
+  t.className = 'toast';
+  t.innerHTML = `<span class="live-dot on"></span>${escHtml(tekst)}`;
+  t.onclick = () => { t.remove(); if (ticketId) openTicket(ticketId); };
+  box.appendChild(t);
+  setTimeout(() => t.classList.add('toast-out'), 6000);
+  setTimeout(() => t.remove(), 6500);
+}
+
+// --- Panel SLA ---------------------------------------------------------------
+function panelSla(lista) {
+  if (!lista.length) {
+    return `<div class="empty-state sla-ok"><div class="sla-ok-icon">✓</div><p>Wszystkie terminy SLA pod kontrolą.</p></div>`;
+  }
+  return `<ul class="sla-list">${lista.map(t => `
+    <li class="sla-item" onclick="openTicket(${t.id})">
+      <div class="sla-main">
+        <div class="feed-title"><span class="td-id">#${t.id}</span> ${escHtml(t.title)}</div>
+        <div class="feed-meta">${priorityBadge(t.priority)} ${statusBadge(t.status)}
+          · ${t.assigned_to_name ? escHtml(t.assigned_to_name) : '<span style="color:var(--color-orange)">nieprzypisane</span>'}</div>
+      </div>
+      ${licznikSla(t.sla_deadline)}
+    </li>`).join('')}</ul>`;
+}
+
+function kartaAI(ai) {
+  if (!ai || !ai.zgloszen_z_ai) return '';
+  const proc = Math.round((ai.skutecznosc ?? 0) * 100);
+  const kolor = proc >= 90 ? 'var(--color-success)' : proc >= 75 ? 'var(--color-warning)' : 'var(--color-error)';
+  const pomylka = ai.najczestsze_pomylki && ai.najczestsze_pomylki[0];
+  return `
+    <div class="card">
+      <div class="section-header"><div class="section-title">Moduł AI</div><span class="badge badge-ai">na żywo</span></div>
+      <div class="ai-gauge">
+        <div class="ai-gauge-value" style="color:${kolor}">${proc}%</div>
+        <div class="ai-gauge-sub">trafnych kategorii<br><small>${ai.poprawionych_recznie} z ${ai.zgloszen_z_ai} poprawionych ręcznie</small></div>
+      </div>
+      <div class="bar-track" style="margin:0.75rem 0 1rem"><div class="bar-fill grow" style="width:${proc}%;background:${kolor}"></div></div>
+      <div class="ai-stats">
+        <div><span>Średnia pewność</span><b>${ai.srednia_pewnosc !== null ? Math.round(ai.srednia_pewnosc * 100) + '%' : '—'}</b></div>
+        <div><span>Do weryfikacji</span><b style="color:${ai.wymaga_weryfikacji ? 'var(--color-orange)' : 'inherit'}">${ai.wymaga_weryfikacji}</b></div>
+        ${pomylka ? `<div><span>Najczęstsza pomyłka</span><b>${escHtml(kategoriaPL(pomylka.z))} → ${escHtml(kategoriaPL(pomylka.na))}</b></div>` : ''}
+      </div>
+    </div>`;
+}
+
+// --- Pulpit technika ---------------------------------------------------------
+async function pulpitTechnika(c, odswiezenie) {
+  const zakladka = ZAKLADKI_PULPITU[pulpit.zakladka] || ZAKLADKI_PULPITU.najnowsze;
+  const [d, lista, ai] = await Promise.all([
+    apiFetch('/dashboard'),
+    apiFetch('/tickets?per_page=6' + zakladka.query),
+    apiFetch('/ai/skutecznosc').catch(() => null),   // pulpit działa też bez tej karty
+  ]);
+  if (state.currentView !== 'dashboard') return;     // użytkownik zdążył przejść gdzie indziej
+
+  const s = d.statystyki, p = d.puls;
+  const naglowek = `
+    <div class="pulpit-naglowek">
+      <div>
+        <h2>Konsola Obsługi IT</h2>
+        <p>${new Date().toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' })}
+          · dziś <b>+${p.dzis_nowe}</b> nowych, <b>${p.dzis_zamkniete}</b> zamkniętych</p>
+      </div>
+      ${pasekNaZywo()}
+    </div>`;
+
+  const kpi = kafelki([
+    { klucz: 'aktywne', etykieta: 'Aktywne', wartosc: s.otwarte - s.rozwiazane, podpis: `${s.w_trakcie} w trakcie`,
+      kolor: 'var(--color-blue)', filtr: { skrot: 'aktywne' }, tytul: 'Zgłoszenia, nad którymi trwa praca' },
+    { klucz: 'nieprzypisane', etykieta: 'Nieprzypisane', wartosc: p.nieprzypisane, podpis: 'czekają na technika',
+      kolor: 'var(--color-orange)', filtr: { skrot: 'nieprzypisane' } },
+    { klucz: 'po_terminie', etykieta: 'Po terminie SLA', wartosc: p.po_terminie, podpis: 'przekroczony czas',
+      kolor: 'var(--color-error)', filtr: { skrot: 'po_terminie' }, alarm: p.po_terminie > 0 },
+    { klucz: 'zagrozone', etykieta: 'Zagrożone SLA', wartosc: p.zagrozone, podpis: 'termin w ciągu 2 h',
+      kolor: 'var(--color-warning)', akcja: "document.getElementById('panelSla').scrollIntoView({behavior:'smooth'})" },
+    { klucz: 'krytyczne', etykieta: 'Krytyczne', wartosc: d.wg_priorytetu.Krytyczny || 0, podpis: 'aktywne, priorytet 1',
+      kolor: 'var(--color-error)', filtr: { priority: 'Krytyczny', skrot: 'aktywne' } },
+    { klucz: 'moje', etykieta: 'Moje', wartosc: p.moje, podpis: 'przypisane do Ciebie',
+      kolor: 'var(--color-primary)', filtr: { skrot: 'moje' } },
+    { klucz: 'rozwiazane', etykieta: 'Do zamknięcia', wartosc: s.rozwiazane, podpis: 'rozwiązane, czekają',
+      kolor: 'var(--color-success)', filtr: { status: 'Rozwiazane' } },
+  ], odswiezenie);
+
+  const zakladki = Object.entries(ZAKLADKI_PULPITU).map(([k, z]) => `
+    <button type="button" class="tab ${k === pulpit.zakladka ? 'active' : ''}" onclick="pulpit.zakladka='${k}';renderDashboard(true)">${z.nazwa}</button>`).join('');
+
+  c.innerHTML = `
+    ${naglowek}
+    ${kpi}
+    <div class="pulpit-grid">
+      <div class="card">
+        <div class="section-header"><div class="section-title">Ruch w zgłoszeniach</div><small class="muted">ostatnie ${d.trend.length} dni</small></div>
+        ${wykresRuchu(d.trend, !odswiezenie)}
+      </div>
+      <div class="card">
+        <div class="section-header"><div class="section-title">Kolejka wg priorytetu</div></div>
+        ${donutPriorytetow(d.wg_priorytetu)}
+      </div>
+    </div>
+    <div class="pulpit-grid pulpit-grid-rowne">
+      <div class="card" id="panelSla">
+        <div class="section-header"><div class="section-title">Pilnuj SLA</div>
+          ${p.po_terminie ? `<button class="btn btn-sm btn-secondary" onclick="${linkListy({ skrot: 'po_terminie' })}">Wszystkie po terminie (${p.po_terminie})</button>` : ''}</div>
+        ${panelSla(d.pilne_sla)}
+      </div>
+      <div class="card">
+        <div class="section-header"><div class="section-title">Ostatnia aktywność</div><span class="live-dot ${pulpit.auto ? 'on' : ''}"></span></div>
+        ${kanalAktywnosci(d.aktywnosc, odswiezenie)}
+      </div>
+    </div>
+    <div class="pulpit-grid pulpit-grid-trzy">
+      <div class="card">
+        <div class="section-header"><div class="section-title">Obciążenie zespołu</div><small class="muted">aktywne zgłoszenia</small></div>
+        ${obciazenieZespolu(d.obciazenie)}
+      </div>
+      <div class="card">
+        <div class="section-header"><div class="section-title">Kategorie</div><small class="muted">kliknij, aby filtrować</small></div>
+        ${slupkiKategorii(d.wg_kategorii)}
+      </div>
+      ${kartaAI(ai)}
+    </div>
+    <div class="card">
+      <div class="section-header">
+        <div class="tabs">${zakladki}</div>
+        <button class="btn btn-sm btn-secondary" onclick="navigate('all-tickets')">Wszystkie zgłoszenia</button>
+      </div>
+      ${lista.tickets.length ? renderTicketTable(lista.tickets, true) : emptyState('Brak zgłoszeń w tym widoku.')}
+    </div>`;
+
+  if (!odswiezenie) animujLiczniki(c);
+}
+
+// --- Pulpit pracownika -------------------------------------------------------
+const SZABLONY_ZGLOSZEN = [
+  { ikona: '🌐', tytul: 'Brak dostępu do internetu',
+    opis: 'Od [godzina] nie mam dostępu do internetu na komputerze. Inne osoby w pokoju [mają / nie mają] ten sam problem.' },
+  { ikona: '🔑', tytul: 'Nie mogę się zalogować',
+    opis: 'Nie mogę zalogować się do [nazwa systemu]. Komunikat błędu: [treść komunikatu].' },
+  { ikona: '🖨️', tytul: 'Drukarka nie drukuje',
+    opis: 'Drukarka [nazwa / pokój] nie drukuje. Objawy: [np. zacina papier, brak reakcji, błąd na wyświetlaczu].' },
+  { ikona: '📧', tytul: 'Problem z pocztą',
+    opis: 'Nie mogę [wysłać / odebrać] wiadomości w Outlooku. Komunikat: [treść komunikatu].' },
+  { ikona: '💻', tytul: 'Komputer działa nieprawidłowo',
+    opis: 'Mój komputer [nie włącza się / zawiesza się / wyświetla niebieski ekran]. Problem występuje od [kiedy].' },
+  { ikona: '⚠️', tytul: 'Podejrzany e-mail',
+    opis: 'Przyszła podejrzana wiadomość od [nadawca] — wygląda na phishing. Nadawca prosi o [podanie hasła / kliknięcie w link].' },
+];
+
+function nowyZSzablonu(i) {
+  navigate('new-ticket');
+  const s = SZABLONY_ZGLOSZEN[i];
+  document.getElementById('ticketTitle').value = s.tytul;
+  const opis = document.getElementById('ticketDesc');
+  opis.value = s.opis;
+  opis.focus();
+  // Zaznacz pierwszy fragment do uzupełnienia, żeby od razu go nadpisać.
+  const od = s.opis.indexOf('['), doo = s.opis.indexOf(']');
+  if (od >= 0) opis.setSelectionRange(od, doo + 1);
+  podpowiedzAI();
+}
+
+function chipySzablonow() {
+  return `<div class="chips">${SZABLONY_ZGLOSZEN.map((s, i) => `
+    <button type="button" class="chip" onclick="nowyZSzablonu(${i})"><span>${s.ikona}</span>${escHtml(s.tytul)}</button>`).join('')}</div>`;
+}
+
+const KROKI_STATUSU = ['Nowe', 'W trakcie', 'Rozwiazane', 'Zamkniete'];
+
+function postepZgloszenia(t) {
+  const wstrzymane = t.status === 'Wstrzymane';
+  const biezacy = wstrzymane ? 1 : KROKI_STATUSU.indexOf(t.status);
+  return `<div class="stepper">${KROKI_STATUSU.map((k, i) => `
+    <div class="step ${i < biezacy ? 'done' : ''} ${i === biezacy ? 'current' : ''} ${wstrzymane && i === 1 ? 'paused' : ''}">
+      <span class="step-dot"></span><span class="step-label">${wstrzymane && i === 1 ? 'Wstrzymane' : statusLabel(k)}</span>
+    </div>`).join('')}</div>`;
+}
+
+function kartaZgloszenia(t) {
+  return `
+    <div class="ticket-card" onclick="openTicket(${t.id})">
+      <div class="ticket-card-head">
+        <div><span class="td-id">#${t.id}</span> <b>${escHtml(t.title)}</b></div>
+        ${priorityBadge(t.priority)}
+      </div>
+      <div class="feed-meta">${escHtml(kategoriaPL(t.category || '—'))} ${znacznikAI(t)}
+        · ${t.assigned_to_name ? `zajmuje się: <b>${escHtml(t.assigned_to_name)}</b>` : 'czeka na technika'}</div>
+      ${postepZgloszenia(t)}
+      ${t.status !== 'Rozwiazane' ? `<div class="feed-meta">Czas obsługi wg SLA: ${licznikSla(t.sla_deadline)}</div>` : ''}
+    </div>`;
+}
+
+async function pulpitPracownika(c, odswiezenie) {
+  // Liczniki pochodzą z backendu (zakres: własne zgłoszenia pracownika).
+  // Liczenie ich z pobranej listy dawałoby błędne wyniki, bo lista jest stronicowana.
+  const [d, aktywne, ostatnie] = await Promise.all([
+    apiFetch('/dashboard'),
+    apiFetch('/tickets?per_page=6&aktywne=1'),
+    apiFetch('/tickets?per_page=5'),
+  ]);
+  if (state.currentView !== 'dashboard') return;
+  const s = d.statystyki;
+
+  const kpi = kafelki([
+    { klucz: 'w_toku', etykieta: 'W obsłudze', wartosc: s.otwarte - s.rozwiazane, podpis: 'aktywne zgłoszenia',
+      kolor: 'var(--color-primary)', akcja: "navigate('my-tickets')" },
+    { klucz: 'rozwiazane', etykieta: 'Rozwiązane', wartosc: s.rozwiazane, podpis: 'czekają na zamknięcie',
+      kolor: 'var(--color-warning)', akcja: "navigate('my-tickets')" },
+    { klucz: 'zamkniete', etykieta: 'Zamknięte', wartosc: s.zamkniete, podpis: 'sprawy zakończone',
+      kolor: 'var(--color-success)', akcja: "navigate('my-tickets')" },
+    { klucz: 'wszystkie', etykieta: 'Łącznie', wartosc: s.wszystkie, podpis: 'wszystkich zgłoszeń', akcja: "navigate('my-tickets')" },
+  ], odswiezenie);
+
+  c.innerHTML = `
+    <div class="pulpit-naglowek">
+      <div>
+        <h2>Witaj, ${escHtml(state.user.split(' ')[0])}! 👋</h2>
+        <p>${state.clientName ? escHtml(state.clientName) + ' · ' : ''}Zarządzaj swoimi zgłoszeniami IT</p>
+      </div>
+      ${pasekNaZywo()}
+    </div>
+    ${kpi}
+    <div class="card cta-card">
+      <div>
+        <div class="section-title">Coś nie działa?</div>
+        <p class="muted">Wybierz gotowy szablon albo opisz problem własnymi słowami — moduł AI sam nada kategorię i priorytet.</p>
+      </div>
+      <button class="btn btn-primary" onclick="navigate('new-ticket')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        Nowe zgłoszenie</button>
+      ${chipySzablonow()}
+    </div>
+    <div class="pulpit-grid">
+      <div class="card">
+        <div class="section-header"><div class="section-title">Moje sprawy w toku</div>
+          <button class="btn btn-sm btn-secondary" onclick="navigate('my-tickets')">Wszystkie</button></div>
+        ${aktywne.tickets.length
+          ? `<div class="ticket-cards">${aktywne.tickets.map(kartaZgloszenia).join('')}</div>`
+          : emptyState('Nie masz otwartych spraw — wszystko działa. 🎉')}
+      </div>
+      <div class="card">
+        <div class="section-header"><div class="section-title">Co się zmieniło</div><span class="live-dot ${pulpit.auto ? 'on' : ''}"></span></div>
+        ${kanalAktywnosci(d.aktywnosc, odswiezenie)}
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-header"><div class="section-title">Ostatnie zgłoszenia</div>
+        <button class="btn btn-sm btn-secondary" onclick="navigate('my-tickets')">Zobacz wszystkie</button></div>
+      ${ostatnie.tickets.length ? renderTicketTable(ostatnie.tickets, false) : emptyState('Nie masz jeszcze żadnych zgłoszeń.')}
+    </div>`;
+
+  if (!odswiezenie) animujLiczniki(c);
 }
 
 // ============================================================
@@ -374,6 +886,16 @@ async function renderMyTickets() {
 // ============================================================
 // ALL TICKETS (technik/admin)
 // ============================================================
+// Skróty, którymi pulpit otwiera listę (kliknięcie w kafelek).
+const SKROTY_LISTY = {
+  aktywne:       { nazwa: 'Tylko aktywne',     query: '&aktywne=1' },
+  nieprzypisane: { nazwa: 'Nieprzypisane',     query: '&przypisane=brak&aktywne=1' },
+  moje:          { nazwa: 'Przypisane do mnie', query: '&przypisane=ja&aktywne=1' },
+  po_terminie:   { nazwa: 'Po terminie SLA',   query: '&sla=przekroczone' },
+};
+
+const KATEGORIE = ['Sprzet', 'Oprogramowanie', 'Siec', 'Poczta', 'Konta i dostep', 'Bezpieczenstwo', 'Peryferia'];
+
 async function renderAllTickets() {
   const c = document.getElementById('mainContent');
   try {
@@ -381,6 +903,9 @@ async function renderAllTickets() {
     if (state.filterStatus)   url += `&status=${encodeURIComponent(state.filterStatus)}`;
     if (state.filterPriority) url += `&priority=${encodeURIComponent(state.filterPriority)}`;
     if (state.filterClient)   url += `&client_id=${encodeURIComponent(state.filterClient)}`;
+    if (state.filterCategory) url += `&category=${encodeURIComponent(state.filterCategory)}`;
+    const skrot = SKROTY_LISTY[state.filterSkrot];
+    if (skrot) url += skrot.query;
     const [data, klienci] = await Promise.all([apiFetch(url), pobierzKlientow()]);
 
     c.innerHTML = `
@@ -404,10 +929,16 @@ async function renderAllTickets() {
             <option value="Sredni"    ${state.filterPriority==='Sredni'   ?'selected':''}>Średni</option>
             <option value="Niski"     ${state.filterPriority==='Niski'    ?'selected':''}>Niski</option>
           </select>
+          <select class="filter-select" onchange="state.filterCategory=this.value;state.page=1;renderView('all-tickets')">
+            <option value="">Wszystkie kategorie</option>
+            ${KATEGORIE.map(k => `<option value="${k}" ${state.filterCategory===k?'selected':''}>${escHtml(kategoriaPL(k))}</option>`).join('')}
+          </select>
           <select class="filter-select" onchange="state.filterClient=this.value;state.page=1;renderView('all-tickets')">
             <option value="">Wszyscy klienci</option>
             ${klienci.map(k => `<option value="${k.id}" ${String(k.id)===String(state.filterClient)?'selected':''}>${escHtml(k.name)}</option>`).join('')}
           </select>
+          ${skrot ? `<button type="button" class="chip chip-active" onclick="state.filterSkrot='';state.page=1;renderView('all-tickets')"
+                      title="Usuń filtr">${skrot.nazwa} <span aria-hidden="true">×</span></button>` : ''}
         </div>
         ${data.tickets.length
           ? renderTicketTable(data.tickets, true) + renderPaginacja(data)
@@ -804,15 +1335,18 @@ function renderNewTicket() {
   return `
     <div style="max-width:640px">
       <div class="card">
-        <h2 style="font-size:var(--text-base);font-weight:600;margin-bottom:1.25rem">Zgłoś problem IT</h2>
-        <div class="form-field">
+        <h2 style="font-size:var(--text-base);font-weight:600;margin-bottom:0.75rem">Zgłoś problem IT</h2>
+        <div class="form-label" style="margin-bottom:0.25rem">Szybki start</div>
+        ${chipySzablonow()}
+        <div class="form-field" style="margin-top:1rem">
           <label class="form-label" for="ticketTitle">Tytuł problemu *</label>
-          <input class="form-input" type="text" id="ticketTitle" placeholder="Krótki opis problemu, np. Brak dostępu do internetu">
+          <input class="form-input" type="text" id="ticketTitle" oninput="podpowiedzAI()" placeholder="Krótki opis problemu, np. Brak dostępu do internetu">
         </div>
         <div class="form-field">
           <label class="form-label" for="ticketDesc">Szczegółowy opis *</label>
-          <textarea class="form-input form-textarea" id="ticketDesc" placeholder="Opisz szczegółowo problem — kiedy wystąpił, co robiłeś, jakie komunikaty błędów widzisz..."></textarea>
+          <textarea class="form-input form-textarea" id="ticketDesc" oninput="podpowiedzAI()" placeholder="Opisz szczegółowo problem — kiedy wystąpił, co robiłeś, jakie komunikaty błędów widzisz..."></textarea>
         </div>
+        <div id="aiPodpowiedz" class="ai-hint" aria-live="polite"></div>
         <div id="aiStatus"></div>
         <div style="display:flex;gap:0.75rem;margin-top:1.25rem">
           <button class="btn btn-primary" id="submitBtn" onclick="submitTicket()">
@@ -823,6 +1357,28 @@ function renderNewTicket() {
         </div>
       </div>
     </div>`;
+}
+
+// Podgląd na żywo: w trakcie pisania pokazujemy, jak moduł AI oceni
+// zgłoszenie. Zapytanie idzie dopiero po chwili bez pisania, żeby nie
+// wysyłać go po każdym znaku.
+function podpowiedzAI() {
+  clearTimeout(podpowiedzAI._t);
+  podpowiedzAI._t = setTimeout(async () => {
+    const box = document.getElementById('aiPodpowiedz');
+    if (!box) return;
+    const title = document.getElementById('ticketTitle').value.trim();
+    const description = document.getElementById('ticketDesc').value.trim();
+    if (title.length + description.length < 8) { box.innerHTML = ''; return; }
+    try {
+      const ai = await apiFetch('/ai/categorize', { method: 'POST', body: JSON.stringify({ title, description }) });
+      if (!document.getElementById('aiPodpowiedz')) return;
+      box.innerHTML = ai.wymaga_weryfikacji
+        ? `<span class="badge badge-ai">AI</span> Opisz problem dokładniej — na razie nie umiem go przypisać do kategorii.`
+        : `<span class="badge badge-ai">AI</span> Wygląda na: <b>${escHtml(kategoriaPL(ai.kategoria))}</b> ${priorityBadge(ai.priorytet)}
+           <small class="muted">pewność ${Math.round(ai.pewnosc * 100)}% · SLA ${{ Krytyczny: '1 h', Wysoki: '4 h', Sredni: '8 h', Niski: '24 h' }[ai.priorytet] || ''}</small>`;
+    } catch { box.innerHTML = ''; }
+  }, 500);
 }
 
 // ============================================================
