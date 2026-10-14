@@ -40,6 +40,7 @@ kategoryzację zgłoszeń przez moduł AI oraz pełną ścieżkę audytu.
 | `app/domain/`          | Reguły biznesowe — kategoryzacja AI, cykl życia zgłoszenia |
 | `app/data/`            | Dostęp do bazy — schemat, zapytania, migracje              |
 | `app/security/`        | Tokeny JWT i kontrola dostępu                              |
+| `app/zadania/`         | Proces roboczy — eskalacja SLA, wysyłka e-maili            |
 | `app/config.py`        | Cała konfiguracja środowiskowa w jednym miejscu            |
 | `app/__init__.py`      | Fabryka aplikacji — nagłówki, kompresja, cache, HTTPS      |
 | `wsgi.py`              | Punkt wejścia dla gunicorna                                |
@@ -110,6 +111,25 @@ Aplikacja jest wtedy dostępna pod **`https://localhost:8443`**, a
 `http://localhost:8080` przekierowuje na HTTPS. Nakładka włącza w aplikacji
 `FORCE_HTTPS=1`, więc odpowiedzi zawierają nagłówek HSTS. Certyfikat i klucz
 są wykluczone z repozytorium (`.gitignore`) i z obrazu Dockera (`.dockerignore`).
+
+### Eskalacja SLA i powiadomienia e-mail
+
+Razem ze stosem startuje kontener `worker`, który co minutę eskaluje
+zgłoszenia po terminie SLA (opis reguł: [DOKUMENTACJA.md](DOKUMENTACJA.md))
+i wysyła e-maile z kolejki powiadomień. Bez ustawionego `SMTP_HOST`
+powiadomienia są widoczne tylko w aplikacji (dzwonek w nagłówku).
+
+Podgląd e-maili lokalnie, bez prawdziwego serwera poczty:
+
+```bash
+make up-poczta          # stos + mailpit; wiadomości: http://localhost:8025
+make worker-logs        # co robi proces roboczy
+```
+
+Prawdziwy serwer poczty ustawia się w `.env` (`SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASSWORD`, `SMTP_TLS`, `SMTP_FROM`, `APP_URL` — opis
+w `.env.example`). Bez Dockera proces roboczy uruchamia się poleceniem
+`python -m app.zadania`.
 
 ### Kopie zapasowe
 
@@ -366,6 +386,8 @@ orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
 | GET    | `/api/reports`             | technik/admin | Raport klienta: kategorie, trend, SLA, rekomendacje |
 | GET    | `/api/ai/skutecznosc`      | technik/admin | Skuteczność AI liczona z korekt techników   |
 | POST   | `/api/ai/categorize`       | każdy         | Test modułu AI na dowolnym tekście          |
+| GET    | `/api/notifications`       | każdy         | Własne powiadomienia + liczba nieprzeczytanych |
+| POST   | `/api/notifications/read`  | każdy         | Oznaczenie powiadomień jako przeczytanych   |
 
 **Autoryzacja:** każde żądanie (poza logowaniem) wymaga nagłówka:
 ```

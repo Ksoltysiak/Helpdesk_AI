@@ -6,9 +6,10 @@ a dostęp do bazy trafia z powrotem do tras — i zostaje sama nazwa katalogów.
 
 Zależności mają biec w jedną stronę:
 
-    api  ->  domain,  data,  security
-    data ->  (tylko baza)
-    domain -> nic z aplikacji
+    api     ->  domain,  data,  security
+    zadania ->  domain,  data          (procesy w tle, bez HTTP)
+    data    ->  (tylko baza)
+    domain  ->  nic z aplikacji
 """
 
 import ast
@@ -38,7 +39,7 @@ def _pliki(warstwa: str):
 
 
 def test_struktura_warstw_istnieje():
-    for warstwa in ("api", "domain", "data", "security"):
+    for warstwa in ("api", "domain", "data", "security", "zadania"):
         assert (KATALOG_APLIKACJI / warstwa).is_dir(), f"Brak warstwy {warstwa}"
 
 
@@ -49,7 +50,8 @@ def test_domena_nie_zalezy_od_reszty_aplikacji(plik):
     To warstwa, która przetrwa zmianę frameworka albo bazy danych.
     """
     zabronione = [i for i in _importy(plik)
-                  if i.startswith(("app.api", "app.data", "app.security", "flask"))]
+                  if i.startswith(("app.api", "app.data", "app.security", "app.zadania",
+                                   "flask"))]
     assert not zabronione, f"{plik.name} zależy od {zabronione}"
 
 
@@ -62,11 +64,19 @@ def test_domena_nie_dotyka_bazy(plik):
 def test_warstwa_danych_nie_zalezy_od_warstwy_http(plik):
     """Zapytania nie mogą zależeć od tras — inaczej nie da się ich użyć
     z innego miejsca (np. ze skryptu) ani przetestować bez żądania."""
+    zabronione = [i for i in _importy(plik) if i.startswith(("app.api", "app.zadania"))]
+    assert not zabronione, f"{plik.name} zależy od {zabronione}"
+
+
+@pytest.mark.parametrize("plik", _pliki("zadania"), ids=lambda p: p.name)
+def test_zadania_w_tle_nie_zaleza_od_warstwy_http(plik):
+    """Proces roboczy korzysta z tych samych reguł i zapytań co trasy,
+    ale nie z samych tras — nie ma żądania, na które mógłby odpowiadać."""
     zabronione = [i for i in _importy(plik) if i.startswith("app.api")]
     assert not zabronione, f"{plik.name} zależy od {zabronione}"
 
 
-@pytest.mark.parametrize("plik", _pliki("api"), ids=lambda p: p.name)
+@pytest.mark.parametrize("plik", _pliki("api") + _pliki("zadania"), ids=lambda p: p.name)
 def test_warstwa_http_nie_buduje_wlasnego_sql(plik):
     """SQL należy do warstwy danych.
 

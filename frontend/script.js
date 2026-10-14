@@ -85,6 +85,8 @@ async function doLogin() {
     document.getElementById('app').classList.add('visible');
     setupSidebar();
     navigate('dashboard');
+    uruchomPowiadomienia();
+    otworzZAdresu();
   } catch {
     showLoginError('Nie można połączyć z serwerem.');
   } finally {
@@ -107,6 +109,7 @@ function doLogout() {
   state.filterStatus = ''; state.filterPriority = ''; state.filterClient = ''; state.page = 1;
   state.filterCategory = ''; state.filterSkrot = '';
   zatrzymajOdswiezanie();
+  zatrzymajPowiadomienia();
   pulpit.poprzednie = null; pulpit.znaneWpisy = null; pulpit.zakladka = 'najnowsze';
   sessionStorage.removeItem('helpdesk_token');
   document.getElementById('loginScreen').style.display = 'flex';
@@ -535,6 +538,7 @@ const IKONY_AKCJI = {
   'Zmiana kategorii': ['#', 'var(--color-warning)'],
   'Przypisanie':      ['@', 'var(--color-success)'],
   'Notatka':          ['✎', 'var(--color-text-muted)'],
+  'Eskalacja SLA':    ['!', 'var(--color-error)'],
 };
 
 function opisAkcji(a) {
@@ -544,6 +548,7 @@ function opisAkcji(a) {
     case 'Zmiana kategorii': return `kategoria ${escHtml(kategoriaPL(a.old || '—'))} → <b>${escHtml(kategoriaPL(a.new))}</b>`;
     case 'Przypisanie': return 'zmiana przypisania';
     case 'Notatka': return `notatka: „${escHtml(a.new)}”`;
+    case 'Eskalacja SLA': return `<b>${escHtml(OPIS_ESKALACJI[a.new] || 'eskalacja SLA')}</b>`;
     case 'Kategoryzacja AI':
       try {
         const w = JSON.parse(a.new);
@@ -590,7 +595,7 @@ function kanalAktywnosci(wpisyZBazy, odswiezenie) {
   }).join('')}</ul>`;
 }
 
-function pokazPowiadomienie(tekst, ticketId) {
+function pokazPowiadomienie(tekst, ticketId, poKliknieciu) {
   let box = document.getElementById('toasty');
   if (!box) {
     box = document.createElement('div');
@@ -603,7 +608,7 @@ function pokazPowiadomienie(tekst, ticketId) {
   t.type = 'button';
   t.className = 'toast';
   t.innerHTML = `<span class="live-dot on"></span>${escHtml(tekst)}`;
-  t.onclick = () => { t.remove(); if (ticketId) openTicket(ticketId); };
+  t.onclick = () => { t.remove(); if (poKliknieciu) poKliknieciu(); if (ticketId) openTicket(ticketId); };
   box.appendChild(t);
   setTimeout(() => t.classList.add('toast-out'), 6000);
   setTimeout(() => t.remove(), 6500);
@@ -1392,7 +1397,7 @@ function renderTicketTable(tickets, showAuthor) {
         <div style="font-weight:500">${escHtml(t.title)}</div>
         <div class="td-muted">${escHtml(t.category || '—')} ${znacznikAI(t)}</div>
       </td>
-      <td>${priorityBadge(t.priority)}</td>
+      <td>${priorityBadge(t.priority)} ${znacznikEskalacji(t)}</td>
       <td>${statusBadge(t.status)}</td>
       ${showAuthor ? `<td class="td-muted">
         ${escHtml(t.created_by_name || '#' + t.created_by)}
@@ -1469,7 +1474,7 @@ async function openTicket(id) {
       <div class="modal-body">
         <div class="info-grid">
           <div class="info-item"><div class="info-item-label">Status</div>${statusBadge(t.status)}</div>
-          <div class="info-item"><div class="info-item-label">Priorytet</div>${priorityBadge(t.priority)}</div>
+          <div class="info-item"><div class="info-item-label">Priorytet</div>${priorityBadge(t.priority)} ${znacznikEskalacji(t)}</div>
           <div class="info-item">
             <div class="info-item-label">Kategoria</div>
             <div style="font-size:var(--text-sm);display:flex;align-items:center;gap:0.375rem;flex-wrap:wrap">
@@ -1713,12 +1718,166 @@ async function restoreSession() {
     document.getElementById('app').classList.add('visible');
     setupSidebar();
     navigate('dashboard');
+    uruchomPowiadomienia();
+    otworzZAdresu();
   } catch {
     // Token wygasl lub jest nieprawidlowy — zostajemy na ekranie logowania.
     state.token = null;
     sessionStorage.removeItem('helpdesk_token');
   }
 }
+
+// ============================================================
+// POWIADOMIENIA (dzwonek w nagłówku)
+// ============================================================
+const POWIADOMIENIA_MS = 30000;
+
+const dzwonek = {
+  timer: null,
+  ostatnieId: null,     // najwyższe znane id — nowsze dostają dymek
+  lista: [],
+  nieprzeczytane: 0,
+};
+
+const IKONY_POWIADOMIEN = {
+  status:         ['→', 'var(--color-primary)'],
+  notatka:        ['✎', 'var(--color-blue)'],
+  przypisanie:    ['@', 'var(--color-success)'],
+  nowe_krytyczne: ['+', 'var(--color-error)'],
+  eskalacja:      ['!', 'var(--color-error)'],
+};
+
+const OPIS_ESKALACJI = {
+  '1': 'po terminie SLA — powiadomiono zespół',
+  '2': 'eskalacja do przełożonego',
+};
+
+function znacznikEskalacji(t) {
+  // Stopień zostaje zapamiętany także po rozwiązaniu — wtedy nie ma już czego pilnować.
+  if (state.role === 'pracownik' || !t.eskalacja || ['Rozwiazane', 'Zamkniete'].includes(t.status)) return '';
+  const tekst = t.eskalacja >= 2 ? 'Eskalacja' : 'Po SLA';
+  return `<span class="badge badge-eskalacja" title="${escHtml(OPIS_ESKALACJI[t.eskalacja] || '')}">${tekst}</span>`;
+}
+
+function uruchomPowiadomienia() {
+  zatrzymajPowiadomienia();
+  pobierzPowiadomienia();
+  dzwonek.timer = setInterval(() => { if (!document.hidden) pobierzPowiadomienia(); }, POWIADOMIENIA_MS);
+}
+
+function zatrzymajPowiadomienia() {
+  clearInterval(dzwonek.timer);
+  Object.assign(dzwonek, { timer: null, ostatnieId: null, lista: [], nieprzeczytane: 0 });
+  zamknijPanelPowiadomien();
+  odswiezDzwonek();
+}
+
+async function pobierzPowiadomienia() {
+  let dane;
+  try { dane = await apiFetch('/notifications?limit=20'); } catch { return; }  // spróbujemy przy następnym cyklu
+  if (!state.token) return;  // wylogowanie w trakcie żądania
+
+  // Przy pierwszym pobraniu nie pokazujemy dymków — to nie są nowe zdarzenia, tylko zaległości.
+  const pierwsze = dzwonek.ostatnieId === null;
+  const nowe = pierwsze ? [] : dane.powiadomienia.filter(p => p.id > dzwonek.ostatnieId && !p.przeczytane);
+  dzwonek.ostatnieId = Math.max(dzwonek.ostatnieId || 0, ...dane.powiadomienia.map(p => p.id));
+  dzwonek.lista = dane.powiadomienia;
+  dzwonek.nieprzeczytane = dane.nieprzeczytane;
+
+  // Pulpit sam ogłasza nowe zgłoszenia — bez drugiego dymka o tym samym.
+  nowe.reverse()
+    .filter(p => !(p.typ === 'nowe_krytyczne' && state.currentView === 'dashboard'))
+    .forEach(p => pokazPowiadomienie(p.tresc, p.ticket_id, () => oznaczPrzeczytane([p.id])));
+  odswiezDzwonek();
+}
+
+function odswiezDzwonek() {
+  const licznik = document.getElementById('dzwonekLicznik');
+  const n = dzwonek.nieprzeczytane;
+  licznik.hidden = !n;
+  licznik.textContent = n > 99 ? '99+' : n;
+  document.getElementById('dzwonekBtn').setAttribute('aria-label',
+    n ? `Powiadomienia, nieprzeczytane: ${n}` : 'Powiadomienia');
+  if (!document.getElementById('panelPowiadomien').hidden) renderPanelPowiadomien();
+}
+
+function renderPanelPowiadomien() {
+  const panel = document.getElementById('panelPowiadomien');
+  const pozycje = dzwonek.lista.map(p => {
+    const [ikona, kolor] = IKONY_POWIADOMIEN[p.typ] || ['•', 'var(--color-text-muted)'];
+    return `
+      <li>
+        <button type="button" class="powiadomienie ${p.przeczytane ? '' : 'nieprzeczytane'}" onclick="otworzPowiadomienie(${p.id}, ${p.ticket_id ?? 'null'})">
+          <span class="feed-icon" style="color:${kolor};background:color-mix(in srgb, ${kolor} 14%, transparent)">${ikona}</span>
+          <span class="powiadomienie-tresc">${escHtml(p.tresc)}
+            <span class="powiadomienie-czas" data-od="${p.created_at}">${ileTemu(p.created_at)}</span>
+          </span>
+        </button>
+      </li>`;
+  }).join('');
+  panel.innerHTML = `
+    <div class="panel-powiadomien-naglowek">
+      <b>Powiadomienia</b>
+      ${dzwonek.nieprzeczytane ? '<button type="button" class="btn btn-ghost btn-sm" onclick="oznaczPrzeczytane()">Oznacz wszystkie</button>' : ''}
+    </div>
+    ${pozycje ? `<ul class="lista-powiadomien">${pozycje}</ul>` : '<p class="panel-powiadomien-pusty">Brak powiadomień.</p>'}`;
+}
+
+function przelaczPanelPowiadomien() {
+  const panel = document.getElementById('panelPowiadomien');
+  if (!panel.hidden) { zamknijPanelPowiadomien(); return; }
+  renderPanelPowiadomien();
+  panel.hidden = false;
+  document.getElementById('dzwonekBtn').setAttribute('aria-expanded', 'true');
+  pobierzPowiadomienia();
+}
+
+function zamknijPanelPowiadomien() {
+  document.getElementById('panelPowiadomien').hidden = true;
+  document.getElementById('dzwonekBtn').setAttribute('aria-expanded', 'false');
+}
+
+// Bez listy id — wszystkie powiadomienia użytkownika.
+async function oznaczPrzeczytane(ids) {
+  try {
+    const wynik = await apiFetch('/notifications/read', {
+      method: 'POST',
+      body: JSON.stringify(ids ? { ids } : {}),
+    });
+    dzwonek.lista.forEach(p => { if (!ids || ids.includes(p.id)) p.przeczytane = true; });
+    dzwonek.nieprzeczytane = wynik.nieprzeczytane;
+    odswiezDzwonek();
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+function otworzPowiadomienie(id, ticketId) {
+  zamknijPanelPowiadomien();
+  oznaczPrzeczytane([id]);
+  if (ticketId) openTicket(ticketId);
+}
+
+// Link z e-maila: /#zgloszenie-12 otwiera zgłoszenie po zalogowaniu.
+function otworzZAdresu() {
+  const m = location.hash.match(/^#zgloszenie-(\d+)$/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  openTicket(Number(m[1]));
+}
+
+window.addEventListener('hashchange', () => { if (state.token) otworzZAdresu(); });
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.dzwonek')) zamknijPanelPowiadomien();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !document.getElementById('panelPowiadomien').hidden) {
+    zamknijPanelPowiadomien();
+    document.getElementById('dzwonekBtn').focus();
+  }
+});
 
 // Close modal on backdrop click
 document.getElementById('ticketModal').addEventListener('click', function(e) {

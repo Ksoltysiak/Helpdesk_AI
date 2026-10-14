@@ -42,6 +42,7 @@ def serialize(t):
         "updated_at":     czas_utc(t["updated_at"]),
         "closed_at":      czas_utc(t["closed_at"]),
         "client_id":      t["client_id"],
+        "eskalacja":      t["eskalacja"],
     }
     if "created_by_name" in keys:
         data["created_by_name"] = t["created_by_name"]

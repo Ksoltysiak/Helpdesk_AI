@@ -7,6 +7,17 @@ Wpisy audytu pełnią podwójną rolę: są historią zgłoszenia dla technika o
 from app.data.database import get_db, czas_utc
 
 AKCJA_ZMIANA_KATEGORII = "Zmiana kategorii"
+AKCJA_ESKALACJA = "Eskalacja SLA"
+
+
+def wykonawca(user_name, action):
+    """Kto wykonał czynność — wpisy bez użytkownika są automatyczne.
+
+    Kategoryzację wykonuje moduł AI, eskalację proces roboczy pilnujący SLA.
+    """
+    if user_name:
+        return user_name
+    return "System" if action == AKCJA_ESKALACJA else "System AI"
 
 
 def zapisz(ticket_id, user_id, action, old=None, new=None):
@@ -26,8 +37,7 @@ def historia(ticket_id):
     ).fetchall()
     return [
         {"action": r["action"],
-         # Wpisy bez użytkownika pochodzą od modułu AI, nie od człowieka.
-         "user": r["user_name"] or "System AI",
+         "user": wykonawca(r["user_name"], r["action"]),
          "old": r["old_value"],
          "new": r["new_value"],
          "timestamp": czas_utc(r["timestamp"])}

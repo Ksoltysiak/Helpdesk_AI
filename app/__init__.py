@@ -6,6 +6,7 @@ Podział na warstwy:
     app/domain/    — reguły biznesowe: kategoryzacja, cykl życia zgłoszenia
     app/data/      — dostęp do bazy: schemat, zapytania, migracje
     app/security/  — tokeny i kontrola dostępu
+    app/zadania/   — proces roboczy: eskalacja SLA, wysyłka e-maili
     app/config.py  — cała konfiguracja środowiskowa w jednym miejscu
 
 Zależności biegną w jedną stronę: `api` korzysta z `domain` i `data`,
@@ -21,7 +22,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import safe_join
 
 from app import config
-from app.api import auth, clients, errors, meta, reports, tickets
+from app.api import auth, clients, errors, meta, powiadomienia, reports, tickets
 from app.data.database import close_db
 from app.extensions import limiter
 
@@ -46,7 +47,8 @@ def create_app():
     app.teardown_appcontext(close_db)
     limiter.init_app(app)
 
-    for modul in (auth.bp, tickets.bp, clients.bp, reports.bp, meta.bp):
+    for modul in (auth.bp, tickets.bp, clients.bp, reports.bp, meta.bp,
+                  powiadomienia.bp):
         app.register_blueprint(modul, url_prefix="/api")
 
     errors.zarejestruj(app)

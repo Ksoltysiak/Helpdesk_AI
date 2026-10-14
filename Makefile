@@ -16,7 +16,7 @@ COMPOSE_HTTPS = docker compose -f docker-compose.yml -f docker-compose.https.yml
 BACKUP_FILE ?= latest
 
 .DEFAULT_GOAL := help
-.PHONY: help up down restart logs seed ps certs up-https down-https backup backups restore test-backup test e2e e2e-docker clean
+.PHONY: help up down restart logs seed ps up-poczta worker-logs certs up-https down-https backup backups restore test-backup test e2e e2e-docker clean
 
 help:
 	@echo "Helpdesk AI - skroty polecen"
@@ -28,6 +28,8 @@ help:
 	@echo "    make logs        logi na biezaco"
 	@echo "    make ps          stan kontenerow i healthcheckow"
 	@echo "    make seed        wypelnia baze danymi testowymi"
+	@echo "    make worker-logs logi procesu roboczego (eskalacja SLA, e-maile)"
+	@echo "    make up-poczta   stos + testowy serwer poczty (http://localhost:8025)"
 	@echo ""
 	@echo "  Docker (HTTPS, https://localhost:8443)"
 	@echo "    make certs       generuje samopodpisany certyfikat"
@@ -50,8 +52,9 @@ help:
 up:
 	$(COMPOSE) up -d --build
 
+# --profile poczta: zatrzymuje też mailpita, jeśli był uruchomiony.
 down:
-	$(COMPOSE) down
+	$(COMPOSE) --profile poczta down
 
 restart:
 	$(COMPOSE) restart
@@ -64,6 +67,14 @@ ps:
 
 seed:
 	$(COMPOSE) exec helpdesk python seed.py
+
+worker-logs:
+	$(COMPOSE) logs -f worker
+
+# Testowy serwer poczty: worker wysyła do mailpita, który niczego nie
+# przekazuje dalej — wiadomości widać w przeglądarce.
+up-poczta:
+	SMTP_HOST=mailpit SMTP_PORT=1025 SMTP_TLS=brak APP_URL=http://localhost:8080 		$(COMPOSE) --profile poczta up -d --build
 
 certs:
 	$(PYTHON) deploy/generate_ssl.py

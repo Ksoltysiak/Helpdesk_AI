@@ -713,6 +713,58 @@ td { padding: 0.75rem 1rem; font-size: var(--text-sm); color: var(--color-text);
 .toast-out { opacity: 0; transform: translateX(1rem); }
 @keyframes wjazd { from { opacity: 0; transform: translateY(1rem); } }
 
+/* === POWIADOMIENIA === */
+.dzwonek { position: relative; }
+.dzwonek-licznik {
+  position: absolute; top: 2px; right: 2px;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-error); color: #fff;
+  font-size: 0.6875rem; font-weight: 600; line-height: 18px; text-align: center;
+  font-variant-numeric: tabular-nums;
+  border: 2px solid var(--color-surface);
+  box-sizing: content-box;
+  transform: translate(35%, -25%);
+}
+.dzwonek-licznik[hidden] { display: none; }
+.panel-powiadomien {
+  position: absolute; top: calc(100% + 0.5rem); right: 0; z-index: 60;
+  width: min(380px, calc(100vw - 2rem));
+  max-height: min(480px, calc(100dvh - var(--header-height) - 2rem));
+  display: flex; flex-direction: column;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--color-shadow-lg);
+  overflow: hidden;
+}
+.panel-powiadomien[hidden] { display: none; }
+.panel-powiadomien-naglowek {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  padding: 0.625rem 0.75rem 0.625rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+}
+.panel-powiadomien-pusty { padding: 1.5rem 1rem; text-align: center; color: var(--color-text-muted); font-size: var(--text-sm); }
+.lista-powiadomien { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.powiadomienie {
+  width: 100%; display: flex; align-items: flex-start; gap: 0.625rem;
+  padding: 0.75rem 1rem; text-align: left;
+  font: inherit; font-size: var(--text-sm); color: var(--color-text-muted);
+  background: none; border: 0; border-bottom: 1px solid var(--color-border); cursor: pointer;
+}
+.lista-powiadomien li:last-child .powiadomienie { border-bottom: 0; }
+.powiadomienie:hover, .powiadomienie:focus-visible { background: var(--color-surface-offset); }
+.powiadomienie.nieprzeczytane { color: var(--color-text); background: color-mix(in srgb, var(--color-primary) 6%, transparent); }
+.powiadomienie.nieprzeczytane .powiadomienie-tresc { font-weight: 500; }
+.powiadomienie-tresc { min-width: 0; overflow-wrap: anywhere; }
+.powiadomienie-czas { display: block; margin-top: 0.125rem; font-size: var(--text-xs); font-weight: 400; color: var(--color-text-muted); }
+.badge-eskalacja { background: var(--color-error); color: #fff; }
+
+@media (max-width: 768px) {
+  .panel-powiadomien { position: fixed; top: calc(var(--header-height) + 0.5rem); right: 1rem; }
+}
+
 @media (max-width: 900px) {
   .pulpit-grid, .pulpit-grid-rowne { grid-template-columns: minmax(0, 1fr); }
   .cta-card { grid-template-columns: 1fr; }

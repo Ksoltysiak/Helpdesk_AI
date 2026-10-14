@@ -33,30 +33,40 @@ app/
 │   ├── auth.py            logowanie, odtwarzanie sesji
 │   ├── tickets.py         zgłoszenia, notatki, audyt
 │   ├── meta.py            kontrola zdrowia, pulpit, moduł AI
+│   ├── powiadomienia.py   dzwonek: lista i oznaczanie powiadomień
 │   ├── validation.py      sprawdzanie typów i długości pól
 │   └── errors.py          błędy zawsze w JSON dla /api/*
 │
 ├── domain/            REGUŁY BIZNESOWE — bez HTTP, bez bazy
 │   ├── ai.py              kategoryzacja zgłoszeń
-│   └── tickets.py         cykl życia zgłoszenia (maszyna stanów)
+│   ├── tickets.py         cykl życia zgłoszenia (maszyna stanów)
+│   ├── powiadomienia.py   kto dostaje powiadomienie o jakim zdarzeniu
+│   └── eskalacja.py       stopnie eskalacji SLA i ich odbiorcy
 │
 ├── data/              DOSTĘP DO DANYCH — cały SQL
 │   ├── database.py        połączenie, schemat, indeksy, migracje
 │   ├── tickets.py         zapytania o zgłoszenia i notatki
 │   ├── users.py           zapytania o użytkowników
-│   └── audit.py           ścieżka audytu i statystyki skuteczności AI
+│   ├── audit.py           ścieżka audytu i statystyki skuteczności AI
+│   └── powiadomienia.py   powiadomienia, kolejka e-maili, eskalacja
 │
-└── security/          KONTROLA DOSTĘPU
-    ├── tokens.py          wystawianie i weryfikacja JWT
-    └── decorators.py      login_required, roles_required
+├── security/          KONTROLA DOSTĘPU
+│   ├── tokens.py          wystawianie i weryfikacja JWT
+│   └── decorators.py      login_required, roles_required
+│
+└── zadania/           PROCES ROBOCZY — praca wyzwalana zegarem, nie żądaniem
+    ├── __main__.py        pętla: python -m app.zadania
+    ├── eskalacja.py       eskalacja zgłoszeń po terminie SLA
+    └── poczta.py          wysyłka e-maili z kolejki powiadomień
 ```
 
 Zależności biegną **w jedną stronę**:
 
 ```
-api  ──>  domain,  data,  security
-data ──>  (tylko baza danych)
-domain ──> nic z aplikacji
+api     ──>  domain,  data,  security
+zadania ──>  domain,  data
+data    ──>  (tylko baza danych)
+domain  ──>  nic z aplikacji
 ```
 
 Warstwa domenowa nie importuje Flaska ani `sqlite3` — reguły biznesowe da się
@@ -90,6 +100,14 @@ Przeglądarka ──────> nginx ──────> gunicorn (2 procesy)
 
 Aplikacja **nie publikuje portu na host** — ruch wchodzi wyłącznie przez nginx.
 Bezpośrednie połączenie z `localhost:5000` nie działa.
+
+Obok działa **proces roboczy** (`worker`, ten sam obraz, polecenie
+`python -m app.zadania`) na tym samym wolumenie z bazą: eskalacja SLA i wysyłka
+e-maili. Nie jest wątkiem w gunicornie, bo gunicorn ma kilka procesów — każdy
+eskalowałby to samo, a restart serwera WWW przerywałby wysyłkę. Jego
+kontrola zdrowia sprawdza znacznik czasu odświeżany po każdym przebiegu:
+pętla, która stanęła (np. na zablokowanej bazie), oznacza kontener jako
+niezdrowy, choć proces nadal istnieje.
 
 ### Po co osobna warstwa nginx
 
@@ -178,6 +196,7 @@ poprzedniej, gdy coś pójdzie nie tak.
 | Plik | Rola |
 |---|---|
 | `wsgi.py` | Wejście dla gunicorna (`gunicorn wsgi:app`) i uruchomienia lokalnego |
+| `app/zadania/__main__.py` | Proces roboczy (`python -m app.zadania`) — eskalacja SLA, e-maile |
 | `seed.py` | Wypełnienie bazy danymi startowymi |
 | `demo.py` | Testy E2E; adres konfigurowalny zmienną `BASE_URL` |
 

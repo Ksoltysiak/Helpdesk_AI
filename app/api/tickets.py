@@ -8,8 +8,10 @@ from flask import Blueprint, request, jsonify, g
 from app import config
 from app.api.validation import obiekt_json, pole_tekstowe, parametr_calkowity
 from app.data import audit, users
+from app.data import powiadomienia as skrzynka
 from app.data import tickets as repo
 from app.data.database import get_db, czas_utc, teraz_utc
+from app.domain import powiadomienia
 from app.domain import tickets as reguly
 from app.domain.ai import categorize, CATEGORIES, SLA_HOURS
 from app.security.decorators import login_required, roles_required
@@ -67,6 +69,9 @@ def utworz():
     # Wpis bez użytkownika — czynność wykonał moduł, nie człowiek.
     audit.zapisz(ticket_id, None, "Kategoryzacja AI", None,
                  json.dumps(wynik, ensure_ascii=False))
+    technicy, administratorzy = skrzynka.personel()
+    skrzynka.dodaj(powiadomienia.po_utworzeniu(ticket_id, title, wynik["priorytet"],
+                                               technicy + administratorzy))
     get_db().commit()
 
     return jsonify({"id": ticket_id, "kategoryzacja_ai": wynik,
@@ -134,6 +139,7 @@ def aktualizuj(ticket_id):
             return jsonify({"error": "Zgloszenie zostalo zmienione w miedzyczasie"
                                      " — odswiez je i sprobuj ponownie"}), 409
         audit.zapisz(ticket_id, g.user["id"], "Zmiana statusu", t["status"], nowy)
+        skrzynka.dodaj(powiadomienia.po_zmianie_statusu(t, nowy, g.user["id"]))
         zmienione.append("status")
 
     if "category" in dane:
@@ -150,6 +156,7 @@ def aktualizuj(ticket_id):
         audit.zapisz(ticket_id, g.user["id"], "Przypisanie",
                      str(poprzednio) if poprzednio is not None else None,
                      str(dane["assigned_to"]))
+        skrzynka.dodaj(powiadomienia.po_przypisaniu(t, dane["assigned_to"], g.user["id"]))
         zmienione.append("assigned_to")
 
     if not zmienione:
@@ -168,13 +175,16 @@ def dodaj_notatke(ticket_id):
     if blad:
         return jsonify({"error": blad}), 400
 
-    if not repo.istnieje(ticket_id):
+    t = repo.pobierz_surowe(ticket_id)
+    if not t:
         return jsonify({"error": "Nie znaleziono zgloszenia"}), 404
 
     # Domyślnie notatka jest wewnętrzna — udostępnienie jej zgłaszającemu
     # musi być świadomą decyzją technika.
-    repo.dodaj_notatke(ticket_id, g.user["id"], content, dane.get("internal", True))
+    wewnetrzna = bool(dane.get("internal", True))
+    repo.dodaj_notatke(ticket_id, g.user["id"], content, wewnetrzna)
     audit.zapisz(ticket_id, g.user["id"], "Notatka", None, content[:60])
+    skrzynka.dodaj(powiadomienia.po_notatce(t, wewnetrzna, g.user["id"]))
     get_db().commit()
     return jsonify({"ok": True}), 201
 

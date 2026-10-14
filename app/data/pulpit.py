@@ -11,6 +11,7 @@ myliłoby je ze sobą.
 
 from datetime import date, timedelta
 
+from app.data.audit import wykonawca
 from app.data.database import get_db, czas_utc
 # Rozwiązane czeka tylko na potwierdzenie zamknięcia, więc SLA już go nie
 # dotyczy — ta sama definicja co w filtrze listy zgłoszeń.
@@ -119,5 +120,5 @@ def ostatnia_aktywnosc(autor_id=None, limit=12):
     ).fetchall()
     return [{"ticket_id": r["ticket_id"], "title": r["title"], "action": r["action"],
              "old": r["old_value"], "new": r["new_value"],
-             "user": r["user_name"] or "System AI",
+             "user": wykonawca(r["user_name"], r["action"]),
              "timestamp": czas_utc(r["timestamp"])} for r in rows]

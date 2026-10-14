@@ -63,6 +63,8 @@ tags:
     description: Notatki techników i historia zmian
   - name: Pulpit i AI
     description: Statystyki oraz moduł kategoryzacji
+  - name: Powiadomienia
+    description: Powiadomienia użytkownika i eskalacja SLA
 
 security:
   - bearerAuth: []
@@ -651,8 +653,9 @@ paths:
         Pełna historia zmian w porządku chronologicznym: utworzenie,
         kategoryzacja AI, zmiany statusu i kategorii, przypisania, notatki.
 
-        Wymaga roli `technik` lub `admin`. Wpisy wykonane automatycznie
-        (kategoryzacja AI) mają w polu `user` wartość `System AI`.
+        Wymaga roli `technik` lub `admin`. Wpisy wykonane automatycznie mają
+        w polu `user` wartość `System AI` (kategoryzacja) albo `System`
+        (eskalacja SLA, akcja `Eskalacja SLA` ze stopniem przed i po).
       responses:
         "200":
           description: Lista wpisów audytu
@@ -864,6 +867,81 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WynikAI" }
+        "400":
+          $ref: "#/components/responses/BledneDane"
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "413":
+          $ref: "#/components/responses/ZaDuzeZadanie"
+
+  # ---------------------------------------------------------------
+  /notifications:
+    get:
+      tags: [Powiadomienia]
+      summary: Powiadomienia zalogowanego użytkownika
+      description: |
+        Najnowsze powiadomienia (od najnowszego) oraz liczba nieprzeczytanych.
+        Każdy widzi wyłącznie własne.
+
+        Powiadomienia powstają przy zmianie statusu i jawnej notatce
+        (dla zgłaszającego), przypisaniu zgłoszenia (dla technika), nowym
+        zgłoszeniu krytycznym (dla personelu) oraz przy eskalacji SLA.
+        Eskalację wykonuje proces roboczy (`python -m app.zadania`):
+
+        1. termin SLA minął → opiekun zgłoszenia, a gdy go nie ma — technicy,
+        2. minęła kolejna połowa czasu SLA → administratorzy.
+
+        Gdy skonfigurowano `SMTP_HOST`, proces roboczy wysyła je też e-mailem.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Lista powiadomień
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nieprzeczytane, powiadomienia]
+                properties:
+                  nieprzeczytane: { type: integer, example: 3 }
+                  powiadomienia:
+                    type: array
+                    items: { $ref: "#/components/schemas/Powiadomienie" }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+
+  /notifications/read:
+    post:
+      tags: [Powiadomienia]
+      summary: Oznaczenie powiadomień jako przeczytanych
+      description: |
+        Bez pola `ids` oznacza wszystkie powiadomienia użytkownika.
+        Identyfikatory cudzych powiadomień są pomijane.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  maxItems: 100
+                  items: { type: integer }
+                  example: [41, 42]
+      responses:
+        "200":
+          description: Wynik
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [oznaczono, nieprzeczytane]
+                properties:
+                  oznaczono: { type: integer, example: 2 }
+                  nieprzeczytane: { type: integer, example: 1 }
         "400":
           $ref: "#/components/responses/BledneDane"
         "401":
@@ -1104,6 +1182,7 @@ components:
         - assigned_to_name
         - client_id
         - client_name
+        - eskalacja
       properties:
         id: { type: integer, example: 12 }
         title: { type: string, example: Nie dziala VPN }
@@ -1134,6 +1213,14 @@ components:
           nullable: true
           description: Imię i nazwisko przypisanego technika
           example: Marek Lewandowski
+        eskalacja:
+          type: integer
+          enum: [0, 1, 2]
+          description: |
+            Najwyższy osiągnięty stopień eskalacji SLA: `0` — brak,
+            `1` — termin przekroczony (powiadomiono opiekuna lub techników),
+            `2` — eskalacja do administratorów.
+          example: 0
         client_id:
           type: integer
           nullable: true
@@ -1195,11 +1282,32 @@ components:
           example: Zmiana statusu
         user:
           type: string
-          description: Osoba wykonująca zmianę lub `System AI` dla działań automatycznych
+          description: Osoba wykonująca zmianę albo `System AI` / `System` dla działań automatycznych
           example: Marek Lewandowski
         old: { type: string, nullable: true, example: Nowe }
         new: { type: string, nullable: true, example: W trakcie }
         timestamp: { type: string, format: date-time }
+
+    Powiadomienie:
+      type: object
+      required: [id, ticket_id, typ, tresc, created_at, przeczytane]
+      properties:
+        id: { type: integer, example: 41 }
+        ticket_id: { type: integer, nullable: true, example: 12 }
+        typ:
+          type: string
+          enum: [status, notatka, przypisanie, nowe_krytyczne, eskalacja]
+          description: |
+            - `status` — zmiana statusu własnego zgłoszenia (pracownik)
+            - `notatka` — notatka jawna w własnym zgłoszeniu (pracownik)
+            - `przypisanie` — ktoś przypisał zgłoszenie tej osobie
+            - `nowe_krytyczne` — nowe zgłoszenie o priorytecie Krytyczny (personel)
+            - `eskalacja` — przekroczony termin SLA
+        tresc:
+          type: string
+          example: "Zgłoszenie #12 „Nie dziala VPN”: status zmieniony na W trakcie"
+        created_at: { type: string, format: date-time }
+        przeczytane: { type: boolean, example: false }
 
     Blad:
       type: object

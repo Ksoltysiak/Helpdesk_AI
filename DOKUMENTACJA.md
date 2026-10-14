@@ -102,6 +102,36 @@ Rozwiązane → Zamknięte) i czasem pozostałym do terminu SLA, zmiany w swoich
 zgłoszeniach oraz gotowe szablony typowych problemów. W formularzu zgłoszenia
 moduł AI już w trakcie pisania podpowiada kategorię i priorytet.
 
+### Eskalacja SLA i powiadomienia
+
+Każdy użytkownik ma w nagłówku **dzwonek** z liczbą nieprzeczytanych
+powiadomień. Nowe powiadomienie pojawia się też jako dymek w rogu ekranu,
+a kliknięcie otwiera zgłoszenie.
+
+| Zdarzenie | Kto dostaje powiadomienie |
+|---|---|
+| Zmiana statusu zgłoszenia | Zgłaszający |
+| Notatka jawna (widoczna dla zgłaszającego) | Zgłaszający |
+| Przypisanie zgłoszenia | Technik, któremu je przypisano |
+| Nowe zgłoszenie o priorytecie Krytyczny | Cały personel (technicy i administratorzy) |
+| Przekroczenie terminu SLA | Opiekun zgłoszenia, a gdy go nie ma — wszyscy technicy |
+| Zgłoszenie nadal otwarte po upływie kolejnej połowy czasu SLA | Administratorzy (eskalacja do przełożonego) |
+
+Nikt nie dostaje powiadomienia o własnej czynności. Dwa ostatnie wiersze to
+**eskalacja**, którą wykonuje osobny proces roboczy (usługa `worker`) co
+minutę. Przykład dla priorytetu Wysoki (SLA 4 h): w chwili przekroczenia
+terminu powiadamiany jest opiekun, dwie godziny później administratorzy.
+Każdy stopień jest zapisywany w zgłoszeniu i w ścieżce audytu, więc o tym
+samym przekroczeniu nikt nie dostaje dwóch powiadomień. Eskalacja tylko
+informuje: nie zmienia priorytetu ani opiekuna, bo to decyzje dla ludzi.
+
+Gdy skonfigurowano serwer poczty (`SMTP_HOST`), powiadomienia idą też
+**e-mailem** z linkiem otwierającym zgłoszenie. Żądanie HTTP tylko zapisuje
+powiadomienie w bazie, a wysyłką zajmuje się proces roboczy — awaria serwera
+poczty nie spowalnia ani nie psuje obsługi zgłoszeń. Wiadomość, której nie
+udało się wysłać, jest ponawiana do 5 razy, a powiadomienia starsze niż
+24 godziny nie idą już e-mailem.
+
 ### Raporty dla klientów
 
 Technik wybiera firmę i okres (np. ostatnie 30 dni, 12 miesięcy lub własny
@@ -317,14 +347,17 @@ Testy: `py -m pytest`. Konfiguracja i rozwiązywanie problemów:
   dopiero pomiar na rzeczywistych zgłoszeniach.
 - SQLite wykonuje zapisy pojedynczo — wystarcza dla małej firmy, ale
   ogranicza skalowanie.
-- System nie wysyła powiadomień o zbliżającym się terminie SLA.
+- Powiadomienia przychodzą dopiero po przekroczeniu terminu SLA, nie przed
+  nim; o zgłoszeniach zagrożonych informuje tylko pulpit.
+- Zgłoszenie wstrzymane (np. w oczekiwaniu na odpowiedź pracownika) też jest
+  eskalowane — czas SLA nie jest na ten okres zatrzymywany.
 
 ### Dalszy rozwój
 
 1. Rola kierownika zespołu — nadzór nad technikami i ustawienia (np. czasy
    SLA), z dostępem do raportów.
-2. Powiadomienia (e-mail, komunikator) o zbliżającym się i przekroczonym
-   terminie SLA oraz comiesięczna wysyłka raportu do klienta.
+2. Powiadomienia przez komunikator (Teams, Slack), ostrzeżenie przed
+   terminem SLA oraz comiesięczna wysyłka raportu do klienta.
 3. Ocena zgłoszeń z pomocą modelu językowego, z powrotem do obecnego modułu
    w razie awarii usługi.
 4. Przejście na PostgreSQL przy większej skali.

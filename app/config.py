@@ -99,6 +99,40 @@ TYPY_KOMPRESOWANE = {
     "image/svg+xml",
 }
 
+# --- Eskalacja SLA i powiadomienia ------------------------------------
+# Proces roboczy (`python -m app.zadania`) co tyle sekund sprawdza terminy
+# SLA i wysyła zaległe e-maile.
+WORKER_INTERWAL = int(os.environ.get("WORKER_INTERWAL", "60"))
+
+# Plik, którego czas modyfikacji proces roboczy odświeża po każdym przebiegu.
+# Kontrola zdrowia kontenera sprawdza na tej podstawie, czy pętla nie stoi.
+# Puste = bez znacznika (np. przy uruchomieniu lokalnym).
+WORKER_HEARTBEAT = os.environ.get("WORKER_HEARTBEAT", "")
+
+# Wysyłka e-maili. Bez SMTP_HOST powiadomienia działają tylko w aplikacji.
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+# starttls (port 587) | ssl (port 465) | brak (tylko serwer w sieci lokalnej,
+# np. mailpit do testów — hasło szłoby jawnym tekstem)
+SMTP_TLS = os.environ.get("SMTP_TLS", "starttls").lower()
+SMTP_FROM = os.environ.get("SMTP_FROM", "helpdesk@localhost")
+
+# Adres aplikacji widziany przez użytkownika — do linku w treści e-maila.
+APP_URL = os.environ.get("APP_URL", "").rstrip("/")
+
+# E-mail, którego nie udało się wysłać tyle razy, przestaje być ponawiany.
+EMAIL_MAX_PROB = 5
+# Starsze powiadomienia nie idą już e-mailem — po dłuższej awarii serwera
+# poczty (albo po włączeniu SMTP po czasie) użytkownik nie dostanie lawiny
+# nieaktualnych wiadomości. Nadal widzi je w aplikacji.
+EMAIL_WAZNOSC_GODZIN = 24
+
+# Ile powiadomień zwraca lista (dzwonek w nagłówku).
+POWIADOMIEN_DOMYSLNIE = 20
+POWIADOMIEN_MAX = 100
+
 # --- Ścieżki -----------------------------------------------------------
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 SPEC_FILE = "openapi.yaml"

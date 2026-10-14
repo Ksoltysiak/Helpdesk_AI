@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     created_at      TEXT DEFAULT (datetime('now')),
     updated_at      TEXT DEFAULT (datetime('now')),
     closed_at       TEXT,
+    -- Najwyzszy osiagniety stopien eskalacji SLA (0 = brak). Zapamietany,
+    -- zeby proces roboczy nie powiadamial o tym samym przekroczeniu co minute.
+    eskalacja       INTEGER NOT NULL DEFAULT 0,
     -- Klient zapisany w chwili utworzenia zgloszenia, a nie wyliczany z autora:
     -- gdy pracownik zmieni firme, jego dawne zgloszenia nadal naleza do
     -- poprzedniej — inaczej raporty dla klientow zmienialyby sie wstecz.
@@ -70,6 +73,22 @@ CREATE TABLE IF NOT EXISTS audit_log (
     old_value   TEXT,
     new_value   TEXT,
     timestamp   TEXT DEFAULT (datetime('now'))
+);
+
+-- Powiadomienia dla uzytkownikow (dzwonek w aplikacji). Ta sama tabela jest
+-- kolejka e-maili: zadanie HTTP tylko zapisuje wiersz, a wysylka odbywa sie
+-- w procesie roboczym — wolny lub niedostepny serwer poczty nie spowalnia
+-- ani nie psuje obslugi zgloszen.
+CREATE TABLE IF NOT EXISTS notifications (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id),
+    ticket_id     INTEGER REFERENCES tickets(id),
+    typ           TEXT NOT NULL,
+    tresc         TEXT NOT NULL,
+    created_at    TEXT DEFAULT (datetime('now')),
+    read_at       TEXT,
+    email_wyslany TEXT,
+    email_proby   INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -114,6 +133,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_akcja      ON audit_log(action, ticket_id);
 -- odczytuje z niego MAX(timestamp) bez siegania do tabeli.
 CREATE INDEX IF NOT EXISTS idx_audit_rozwiazanie ON audit_log(ticket_id, timestamp)
     WHERE action = 'Zmiana statusu' AND new_value = 'Rozwiazane';
+
+-- Dzwonek: najnowsze powiadomienia jednego uzytkownika i licznik nieprzeczytanych.
+CREATE INDEX IF NOT EXISTS idx_powiadomienia_uzytkownik ON notifications(user_id, id DESC);
+-- Kolejka e-maili: indeks czesciowy obejmuje tylko wiersze jeszcze niewyslane,
+-- wiec nie rosnie razem z historia powiadomien.
+CREATE INDEX IF NOT EXISTS idx_powiadomienia_kolejka ON notifications(id)
+    WHERE email_wyslany IS NULL;
 """
 
 # Ustawienia obowiazujace dla KAZDEGO polaczenia — nie sa zapisywane w pliku
@@ -140,6 +166,7 @@ MIGRACJE = (
     ("tickets", "ai_pewnosc", "REAL"),
     ("users",   "client_id",  "INTEGER REFERENCES clients(id)"),
     ("tickets", "client_id",  "INTEGER REFERENCES clients(id)"),
+    ("tickets", "eskalacja",  "INTEGER NOT NULL DEFAULT 0"),
 )
 
 # Uzupelnienie danych po migracji. Zgloszenia sprzed wprowadzenia klientow
