@@ -161,6 +161,52 @@ zmiana zapytania, która przestałaby z nich korzystać, zatrzyma się na CI.
 
 ---
 
+## Statystyki zespołu — test obciążeniowy
+
+Statystyki techników liczą zdarzenia z dziennika audytu (podjęcia
+i rozwiązania zgłoszeń w okresie) oraz bieżące obciążenie. Test: **100 000
+zgłoszeń**, ok. 390 000 wpisów audytu, 29 000 notatek, 10 techników.
+Mediana z 15 wywołań:
+
+| Zapytanie | Pierwsza wersja | Po poprawkach |
+|---|---|---|
+| `GET /api/team`, 30 dni | 350 ms | **35 ms** |
+| `GET /api/team`, 366 dni | 729 ms | **330 ms** |
+| `GET /api/team/{id}`, 30 dni | 367 ms | **18,5 ms** |
+| `GET /api/team/{id}`, 366 dni | 715 ms | **105 ms** |
+| `GET /api/queue` | 55 ms | **44 ms** |
+
+**Co spowalniało i co zmieniono:**
+
+1. **Zły wybór indeksu.** SQLite wybierał ogólny indeks rodzaju akcji
+   i przeglądał każdą zmianę statusu w historii, zamiast małych indeksów
+   częściowych „rozwiązania w czasie" i „podjęcia w czasie". Indeksy są teraz
+   wskazane wprost (`INDEXED BY`), a test sprawdza plan zapytania.
+2. **Obciążenie liczone z całej historii.** Warunek `status NOT IN
+   (zamknięte)` nie korzysta z indeksu — baza czytała każde zgłoszenie, które
+   technik kiedykolwiek prowadził. Statusy otwarte wymieniono wprost
+   i dodano indeksy otwartych zgłoszeń: 130 ms → 2 ms.
+3. **Ostatnie rozwiązanie zgłoszenia.** Zamiast numerowania wszystkich
+   rozwiązań okresu (`ROW_NUMBER()`, sortowanie) wpis liczy się, gdy nie
+   istnieje późniejsze rozwiązanie tego zgłoszenia — jedno wyszukanie
+   w indeksie: 266 ms → 130 ms za rok.
+4. **Statystyki jednego technika** zawężają kandydatów do zgłoszeń, które on
+   rozwiązywał, już na początku zapytania: 66 ms → 1,3 ms.
+
+**Odporność i współbieżność:**
+
+- **2000 losowych zapytań** do nowych punktów końcowych (losowe okresy,
+  identyfikatory, ciała JSON do zmiany SLA i przypisania) — test znalazł
+  błąd 500 dla liczb większych niż mieści kolumna `INTEGER` (2⁶³). Po
+  poprawce wyłącznie odpowiedzi 200/400/403/404.
+- **Wyścig o wolne zgłoszenia:** 10 techników jednocześnie bierze te same
+  40 zgłoszeń (400 równoległych prób na prawdziwym serwerze) — każde
+  zgłoszenie ma **dokładnie jednego** opiekuna, zgodnego z tym, który dostał
+  odpowiedź 200, a w audycie jest dokładnie 40 wpisów „Przypisanie".
+  Przegrani dostają 409 (równoczesna próba) albo 403 (zgłoszenie już zajęte).
+
+---
+
 ## Czego świadomie nie „optymalizowano"
 
 **Czas logowania (~100 ms) jest zamierzony.** To koszt funkcji `scrypt`,

@@ -23,8 +23,8 @@ info:
     | Rola | Uprawnienia |
     |---|---|
     | `pracownik` | Tworzy zgłoszenia, widzi **wyłącznie własne** |
-    | `technik` | Widzi wszystkie, zmienia status/kategorię, dodaje notatki, czyta audyt |
-    | `admin` | Pełny dostęp |
+    | `technik` | Widzi wszystkie, zmienia status/kategorię, dodaje notatki, czyta audyt; bierze wolne zgłoszenia; raporty tylko dla obsługiwanych firm; własne statystyki |
+    | `kierownik` | Wszystko, co technik, oraz: przydziela i przenosi zgłoszenia, raporty dowolnej firmy i zbiorcze, statystyki zespołu, kolejka, czasy SLA |
 
     Odpowiedzi dla pracownika są filtrowane po stronie serwera — nie jest to
     ukrywanie danych w interfejsie, lecz twarda granica dostępu.
@@ -59,6 +59,10 @@ tags:
     description: Firmy obsługiwane przez helpdesk
   - name: Raporty
     description: Zestawienia zgłoszeń dla klientów
+  - name: Zespół
+    description: Statystyki techników i kolejka kierownika
+  - name: Ustawienia
+    description: Czasy SLA zmieniane przez kierownika
   - name: Notatki i audyt
     description: Notatki techników i historia zmian
   - name: Pulpit i AI
@@ -151,7 +155,7 @@ paths:
                   client_id:
                     type: integer
                     nullable: true
-                    description: Firma zalogowanej osoby; `null` dla technika i administratora
+                    description: Firma zalogowanej osoby; `null` dla technika i kierownika
                     example: 1
                   client_name:
                     type: string
@@ -192,7 +196,7 @@ paths:
                   client_id:
                     type: integer
                     nullable: true
-                    description: Firma zalogowanej osoby; `null` dla technika i administratora
+                    description: Firma zalogowanej osoby; `null` dla technika i kierownika
                     example: 1
                   client_name:
                     type: string
@@ -210,7 +214,7 @@ paths:
         **Zakres zależy od roli**, tak samo jak lista zgłoszeń:
 
         - **pracownik** — statystyki wyłącznie jego własnych zgłoszeń,
-        - **technik / admin** — dane zbiorcze całego systemu.
+        - **technik / kierownik** — dane zbiorcze całego systemu.
 
         Dzięki temu pulpit pokazuje to samo, co widoczna dla użytkownika lista,
         a pracownik nie poznaje liczby zgłoszeń w całej organizacji.
@@ -265,7 +269,7 @@ paths:
         - **pracownik** — wyłącznie zgłoszenia, których jest autorem;
           parametry filtrowania są dla niego ignorowane i **nie pozwalają**
           dosięgnąć cudzych zgłoszeń,
-        - **technik / admin** — wszystkie zgłoszenia, z opcjonalnym filtrowaniem.
+        - **technik / kierownik** — wszystkie zgłoszenia, z opcjonalnym filtrowaniem.
 
         **Wyniki są stronicowane.** Domyślnie zwracane jest 50 zgłoszeń na
         stronę, maksymalnie 200. Pole `total` oznacza liczbę **wszystkich**
@@ -276,19 +280,19 @@ paths:
       parameters:
         - name: status
           in: query
-          description: Tylko technik/admin
+          description: Tylko technik/kierownik
           schema: { $ref: "#/components/schemas/Status" }
         - name: priority
           in: query
-          description: Tylko technik/admin
+          description: Tylko technik/kierownik
           schema: { $ref: "#/components/schemas/Priorytet" }
         - name: category
           in: query
-          description: Tylko technik/admin
+          description: Tylko technik/kierownik
           schema: { $ref: "#/components/schemas/Kategoria" }
         - name: client_id
           in: query
-          description: Tylko technik/admin — zgłoszenia jednego klienta
+          description: Tylko technik/kierownik — zgłoszenia jednego klienta
           schema: { type: integer, example: 2 }
         - name: page
           in: query
@@ -392,7 +396,7 @@ paths:
         odczytu cudzego kończy się kodem 403.
 
         Lista notatek również zależy od roli: pracownik widzi tylko notatki
-        jawne (`internal: false`), technik i admin widzą wszystkie.
+        jawne (`internal: false`), technik i kierownik widzą wszystkie.
       responses:
         "200":
           description: Szczegóły zgłoszenia
@@ -418,7 +422,7 @@ paths:
       tags: [Zgłoszenia]
       summary: Zmiana statusu, kategorii lub przypisania
       description: |
-        Wymaga roli `technik` lub `admin`. Należy podać co najmniej jedno
+        Wymaga roli `technik` lub `kierownik`. Należy podać co najmniej jedno
         z pól — pusty obiekt kończy się kodem 400.
 
         **Zmiana statusu podlega maszynie stanów.** Dozwolone przejścia:
@@ -435,9 +439,14 @@ paths:
         do wywołującego, jeśli nie miało jeszcze opiekuna; przejście do
         `Zamkniete` ustawia `closed_at`.
 
+        **Przypisanie (`assigned_to`):** technik może przypisać do siebie
+        wolne zgłoszenie. Przydzielanie zgłoszeń innym, przenoszenie między
+        technikami i zwalnianie przypisania (`null`) należy do kierownika —
+        technik dostaje w takim przypadku kod 403.
+
         Zmiana jest atomowa: błąd w dowolnym polu kończy się kodem 400 bez
-        zapisania pozostałych. Jeśli status zgłoszenia zmienił ktoś inny
-        między odczytem a zapisem (np. dwóch techników podejmuje je
+        zapisania pozostałych. Jeśli status lub opiekuna zgłoszenia zmienił
+        ktoś inny między odczytem a zapisem (np. dwóch techników bierze je
         jednocześnie), odpowiedzią jest 409 — należy odświeżyć zgłoszenie.
       requestBody:
         required: true
@@ -451,9 +460,11 @@ paths:
                 category: { $ref: "#/components/schemas/Kategoria" }
                 assigned_to:
                   type: integer
+                  nullable: true
                   description: |
                     Identyfikator istniejącego użytkownika z rolą `technik`
-                    lub `admin` — inny identyfikator kończy się kodem 400.
+                    lub `kierownik` — inny identyfikator kończy się kodem 400.
+                    `null` zwalnia przypisanie (tylko kierownik).
                   example: 5
             examples:
               podjecie:
@@ -462,6 +473,9 @@ paths:
               korekta:
                 summary: Ręczna korekta kategoryzacji AI
                 value: { category: "Bezpieczenstwo" }
+              przydzial:
+                summary: Kierownik przydziela zgłoszenie technikowi
+                value: { assigned_to: 5 }
       responses:
         "200":
           description: Zaktualizowano
@@ -502,7 +516,7 @@ paths:
         "404":
           $ref: "#/components/responses/NieZnaleziono"
         "409":
-          description: Status zgłoszenia zmieniono w międzyczasie
+          description: Status lub opiekuna zgłoszenia zmieniono w międzyczasie
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Blad" }
@@ -520,7 +534,7 @@ paths:
       tags: [Notatki i audyt]
       summary: Dodanie notatki
       description: |
-        Wymaga roli `technik` lub `admin`.
+        Wymaga roli `technik` lub `kierownik`.
 
         Notatka domyślnie jest **wewnętrzna** (`internal: true`) — niewidoczna
         dla zgłaszającego. Aby udostępnić ją pracownikowi, należy jawnie
@@ -573,7 +587,7 @@ paths:
         Pełna historia zmian w porządku chronologicznym: utworzenie,
         kategoryzacja AI, zmiany statusu i kategorii, przypisania, notatki.
 
-        Wymaga roli `technik` lub `admin`. Wpisy wykonane automatycznie
+        Wymaga roli `technik` lub `kierownik`. Wpisy wykonane automatycznie
         (kategoryzacja AI) mają w polu `user` wartość `System AI`.
       responses:
         "200":
@@ -599,7 +613,7 @@ paths:
         Firmy obsługiwane przez helpdesk wraz z liczbą pracowników oraz
         wszystkich i otwartych zgłoszeń, posortowane alfabetycznie.
 
-        Wymaga roli `technik` lub `admin` — pracownik jednej firmy nie poznaje
+        Wymaga roli `technik` lub `kierownik` — pracownik jednej firmy nie poznaje
         nazw ani skali zgłoszeń innych klientów.
       responses:
         "200":
@@ -643,8 +657,11 @@ paths:
 
         Rekomendacje są regułowe — każda wynika z konkretnej liczby
         w raporcie. Jest ich najwyżej pięć, od najważniejszych
-        (bezpieczeństwo, terminy SLA) do statystycznych. Wymaga roli
-        `technik` lub `admin`.
+        (bezpieczeństwo, terminy SLA) do statystycznych.
+
+        **Dostęp:** technik tworzy raporty wyłącznie dla firm, które obsługuje
+        (pole `obslugiwany` w `GET /clients`). Raport dowolnej firmy i raport
+        zbiorczy (bez `client_id`) — tylko kierownik.
       parameters:
         - name: client_id
           in: query
@@ -673,13 +690,201 @@ paths:
         "401":
           $ref: "#/components/responses/BrakAutoryzacji"
         "403":
-          $ref: "#/components/responses/BrakUprawnien"
+          description: Rola nie pozwala na raporty albo firma nie jest obsługiwana przez technika
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Blad" }
+              example: { error: "Mozesz tworzyc raporty tylko dla firm, ktore obslugujesz" }
         "404":
           description: Klient o podanym identyfikatorze nie istnieje
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Blad" }
               example: { error: "Nie znaleziono klienta" }
+
+  # ---------------------------------------------------------------
+  /team:
+    get:
+      tags: [Zespół]
+      summary: Statystyki wszystkich techników
+      description: |
+        Panel i raport kierownika: dla każdego technika (oraz kierownika)
+        obciążenie, tempo reakcji i rozwiązywania oraz dotrzymanie SLA
+        w wybranym okresie, wraz z sumą zespołu.
+
+        **Definicje** (zgodne z raportami dla klientów):
+
+        - *rozwiązanie* liczy się osobie, która wykonała **ostatnie**
+          przejście zgłoszenia do `Rozwiazane`, w dniu tego przejścia;
+          zgłoszenie otwarte ponownie i nierozwiązane się nie liczy;
+        - *podjęcie* (pierwsza reakcja) — przejście `Nowe → W trakcie`;
+        - *obciążenie* (`otwartych`, `otwartych_po_terminie`) — stan
+          **teraz**, niezależnie od okresu.
+
+        Kolejność techników jest alfabetyczna — statystyki opisują pracę,
+        a nie tworzą rankingu. Wymaga roli `kierownik`.
+      parameters:
+        - name: od
+          in: query
+          description: Pierwszy dzień okresu (włącznie); zasady jak w `GET /reports`
+          schema: { type: string, format: date, example: "2026-09-01" }
+        - name: do
+          in: query
+          description: Ostatni dzień okresu (włącznie)
+          schema: { type: string, format: date, example: "2026-09-30" }
+      responses:
+        "200":
+          description: Statystyki zespołu
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [okres, poprzedni_okres, technicy, zespol]
+                properties:
+                  okres: { $ref: "#/components/schemas/Okres" }
+                  poprzedni_okres: { $ref: "#/components/schemas/OkresPoprzedni" }
+                  technicy:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Osoba"
+                        - $ref: "#/components/schemas/StatystykiTechnika"
+                  zespol: { $ref: "#/components/schemas/StatystykiTechnika" }
+        "400":
+          $ref: "#/components/responses/BledneDane"
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+
+  /team/{technik_id}:
+    parameters:
+      - name: technik_id
+        in: path
+        required: true
+        schema: { type: integer, example: 5 }
+    get:
+      tags: [Zespół]
+      summary: Raport jednego technika
+      description: |
+        Statystyki technika za okres, trend rozwiązanych zgłoszeń, ich
+        kategorie oraz otwarte zgłoszenia, które ma teraz przypisane (od
+        najbliższego terminu SLA).
+
+        Technik może pobrać **wyłącznie własne** statystyki; kierownik —
+        każdego członka zespołu.
+      parameters:
+        - name: od
+          in: query
+          description: Pierwszy dzień okresu (włącznie); zasady jak w `GET /reports`
+          schema: { type: string, format: date, example: "2026-09-01" }
+        - name: do
+          in: query
+          description: Ostatni dzień okresu (włącznie)
+          schema: { type: string, format: date, example: "2026-09-30" }
+      responses:
+        "200":
+          description: Raport technika
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RaportTechnika" }
+        "400":
+          $ref: "#/components/responses/BledneDane"
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          description: Technik próbuje odczytać statystyki innej osoby
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Blad" }
+              example: { error: "Mozesz przegladac tylko wlasne statystyki" }
+        "404":
+          description: Użytkownik nie istnieje albo nie jest technikiem ani kierownikiem
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Blad" }
+              example: { error: "Nie znaleziono technika" }
+
+  /queue:
+    get:
+      tags: [Zespół]
+      summary: Kolejka kierownika
+      description: |
+        Otwarte zgłoszenia wymagające decyzji: **bez opiekuna** oraz
+        **zagrożone** — z terminem SLA krótszym niż `prog_godzin` albo już
+        przekroczonym. Każda lista zawiera do 20 najpilniejszych zgłoszeń
+        (od najbliższego terminu) i łączną liczbę. Wymaga roli `kierownik`.
+      responses:
+        "200":
+          description: Kolejka
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [prog_godzin, nieprzypisane, zagrozone]
+                properties:
+                  prog_godzin: { type: integer, example: 2 }
+                  nieprzypisane: { $ref: "#/components/schemas/ListaKolejki" }
+                  zagrozone: { $ref: "#/components/schemas/ListaKolejki" }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+
+  # ---------------------------------------------------------------
+  /settings/sla:
+    get:
+      tags: [Ustawienia]
+      summary: Obowiązujące czasy SLA
+      description: |
+        Czasy realizacji (w godzinach) dla każdego priorytetu, wartości
+        domyślne i historia zmian. Wymaga roli `technik` lub `kierownik`.
+      responses:
+        "200":
+          description: Czasy SLA
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UstawieniaSla" }
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+    put:
+      tags: [Ustawienia]
+      summary: Zmiana czasów SLA
+      description: |
+        Nowe czasy dla wybranych priorytetów (pozostałe bez zmian). Dotyczą
+        **wyłącznie zgłoszeń utworzonych po zmianie** — termin istniejących
+        zgłoszeń się nie przesuwa. Każda faktyczna zmiana trafia do historii
+        z autorem i czasem. Wymaga roli `kierownik`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [godziny]
+              properties:
+                godziny:
+                  type: object
+                  minProperties: 1
+                  description: Priorytet → liczba godzin (całkowita, 1–720)
+                  additionalProperties: { type: integer, minimum: 1, maximum: 720 }
+                  example: { Krytyczny: 2, Wysoki: 6 }
+      responses:
+        "200":
+          description: Czasy SLA po zmianie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UstawieniaSla" }
+        "400":
+          $ref: "#/components/responses/BledneDane"
+        "401":
+          $ref: "#/components/responses/BrakAutoryzacji"
+        "403":
+          $ref: "#/components/responses/BrakUprawnien"
+        "413":
+          $ref: "#/components/responses/ZaDuzeZadanie"
 
   # ---------------------------------------------------------------
   /ai/skutecznosc:
@@ -696,7 +901,7 @@ paths:
         jaką poprawiano), co wprost wskazuje, które słowa kluczowe wymagają
         uzupełnienia.
 
-        Wymaga roli `technik` lub `admin`.
+        Wymaga roli `technik` lub `kierownik`.
       responses:
         "200":
           description: Zestawienie skuteczności
@@ -815,7 +1020,7 @@ components:
 
     Rola:
       type: string
-      enum: [pracownik, technik, admin]
+      enum: [pracownik, technik, kierownik]
 
     Status:
       type: string
@@ -870,10 +1075,16 @@ components:
 
     Klient:
       type: object
-      required: [id, name, pracownikow, zgloszen, otwartych]
+      required: [id, name, pracownikow, zgloszen, otwartych, obslugiwany]
       properties:
         id: { type: integer, example: 2 }
         name: { type: string, example: Biuro Rachunkowe Bilans }
+        obslugiwany:
+          type: boolean
+          description: |
+            Czy pytający obsługuje tę firmę — technik tworzy raporty tylko dla
+            obsługiwanych firm; dla kierownika zawsze `true`.
+          example: true
         pracownikow:
           type: integer
           description: Liczba kont pracowników tej firmy
@@ -886,6 +1097,126 @@ components:
           type: integer
           description: Zgłoszenia o statusie innym niż `Zamkniete`
           example: 4
+
+    Okres:
+      type: object
+      required: [od, do, dni, grupowanie]
+      properties:
+        od: { type: string, format: date, example: "2026-09-07" }
+        do: { type: string, format: date, example: "2026-10-06" }
+        dni: { type: integer, example: 30 }
+        grupowanie: { type: string, enum: [dzien, tydzien, miesiac] }
+
+    OkresPoprzedni:
+      type: object
+      required: [od, do]
+      properties:
+        od: { type: string, format: date, example: "2026-08-08" }
+        do: { type: string, format: date, example: "2026-09-06" }
+
+    Osoba:
+      type: object
+      required: [id, name, role]
+      properties:
+        id: { type: integer, example: 5 }
+        name: { type: string, example: Joanna Zielinska }
+        role: { $ref: "#/components/schemas/Rola" }
+
+    StatystykiTechnika:
+      type: object
+      required: [otwartych, otwartych_po_terminie, podjetych, sredni_czas_reakcji_h,
+                 rozwiazanych, rozwiazanych_poprzednio, zmiana_proc,
+                 sredni_czas_rozwiazania_h, rozwiazanych_z_terminem, w_terminie_sla,
+                 procent_w_terminie_sla, notatek]
+      properties:
+        otwartych: { type: integer, description: Przypisane teraz i otwarte, example: 4 }
+        otwartych_po_terminie: { type: integer, description: Z nich po terminie SLA, example: 1 }
+        podjetych: { type: integer, description: "Przejścia Nowe → W trakcie w okresie", example: 12 }
+        sredni_czas_reakcji_h: { type: number, nullable: true, example: 1.5 }
+        rozwiazanych: { type: integer, example: 10 }
+        rozwiazanych_poprzednio: { type: integer, example: 8 }
+        zmiana_proc: { type: number, nullable: true, example: 25.0 }
+        sredni_czas_rozwiazania_h: { type: number, nullable: true, example: 6.2 }
+        rozwiazanych_z_terminem: { type: integer, example: 10 }
+        w_terminie_sla: { type: integer, example: 9 }
+        procent_w_terminie_sla: { type: number, nullable: true, example: 90.0 }
+        notatek: { type: integer, description: Notatki dodane w okresie, example: 7 }
+
+    RaportTechnika:
+      type: object
+      required: [technik, okres, poprzedni_okres, statystyki, trend, wg_kategorii, otwarte]
+      properties:
+        technik: { $ref: "#/components/schemas/Osoba" }
+        okres: { $ref: "#/components/schemas/Okres" }
+        poprzedni_okres: { $ref: "#/components/schemas/OkresPoprzedni" }
+        statystyki: { $ref: "#/components/schemas/StatystykiTechnika" }
+        trend:
+          type: array
+          description: Rozwiązane zgłoszenia w kolejnych przedziałach okresu
+          items:
+            type: object
+            required: [okres, liczba]
+            properties:
+              okres: { type: string, example: "2026-09-07" }
+              liczba: { type: integer, example: 2 }
+        wg_kategorii:
+          type: array
+          description: Kategorie rozwiązanych zgłoszeń, od najczęstszej
+          items:
+            type: object
+            required: [kategoria, etykieta, liczba]
+            properties:
+              kategoria:
+                allOf: [{ $ref: "#/components/schemas/Kategoria" }]
+                nullable: true
+              etykieta: { type: string, example: Sieć }
+              liczba: { type: integer, example: 4 }
+        otwarte:
+          type: array
+          description: Do 20 otwartych zgłoszeń technika, od najbliższego terminu SLA
+          items: { $ref: "#/components/schemas/Zgloszenie" }
+
+    ListaKolejki:
+      type: object
+      required: [liczba, zgloszenia]
+      properties:
+        liczba: { type: integer, description: Wszystkie zgłoszenia w tej kolejce, example: 7 }
+        zgloszenia:
+          type: array
+          description: Do 20 najpilniejszych
+          items: { $ref: "#/components/schemas/Zgloszenie" }
+
+    UstawieniaSla:
+      type: object
+      required: [godziny, domyslne, zakres, historia]
+      properties:
+        godziny:
+          type: object
+          description: Obowiązujące czasy SLA (godziny) według priorytetu
+          additionalProperties: { type: integer }
+          example: { Krytyczny: 2, Wysoki: 4, Sredni: 8, Niski: 24 }
+        domyslne:
+          type: object
+          additionalProperties: { type: integer }
+          example: { Krytyczny: 1, Wysoki: 4, Sredni: 8, Niski: 24 }
+        zakres:
+          type: object
+          required: [min, max]
+          properties:
+            min: { type: integer, example: 1 }
+            max: { type: integer, example: 720 }
+        historia:
+          type: array
+          description: Ostatnie zmiany, od najnowszej
+          items:
+            type: object
+            required: [ustawienie, stara, nowa, kto, kiedy]
+            properties:
+              ustawienie: { type: string, example: SLA Krytyczny }
+              stara: { type: string, example: "1" }
+              nowa: { type: string, example: "2" }
+              kto: { type: string, nullable: true, example: Tomasz Adamski }
+              kiedy: { type: string, format: date-time }
 
     Raport:
       type: object

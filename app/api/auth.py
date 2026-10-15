@@ -29,8 +29,7 @@ def _hash_zastepczy():
 def _tozsamosc(user):
     """Dane, które interfejs pokazuje o zalogowanej osobie.
 
-    Klient (firma) jest pusty dla personelu helpdesku — technik i administrator
-    obsługują wszystkie firmy.
+    Klient (firma) jest pusty dla personelu helpdesku — technika i kierownika.
     """
     return {
         "id":          user["id"],

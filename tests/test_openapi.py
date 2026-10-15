@@ -252,6 +252,36 @@ def test_schemat_raportu_odpowiada_odpowiedzi(client, technik, spec):
             assert set(raport[pole][0]) == set(schemat["properties"][pole]["items"]["properties"]), pole
 
 
+def test_schematy_zespolu_odpowiadaja_odpowiedziom(client, kierownik, spec):
+    """Statystyki zespolu, raport technika, kolejka i ustawienia SLA."""
+    schematy = spec["components"]["schemas"]
+    statystyki = set(schematy["StatystykiTechnika"]["properties"])
+
+    zespol = client.get("/api/team", headers=kierownik).get_json()
+    assert set(zespol["zespol"]) == statystyki
+    assert set(zespol["technicy"][0]) == statystyki | set(schematy["Osoba"]["properties"])
+    assert set(zespol["okres"]) == set(schematy["Okres"]["properties"])
+
+    raport = client.get("/api/team/3", headers=kierownik).get_json()
+    assert set(raport) == set(schematy["RaportTechnika"]["properties"])
+    assert set(raport["statystyki"]) == statystyki
+    assert set(raport["otwarte"][0]) == set(schematy["Zgloszenie"]["properties"])
+
+    kolejka = client.get("/api/queue", headers=kierownik).get_json()
+    assert set(kolejka["nieprzypisane"]) == set(schematy["ListaKolejki"]["properties"])
+
+    client.put("/api/settings/sla", headers=kierownik, json={"godziny": {"Wysoki": 5}})
+    sla = client.get("/api/settings/sla", headers=kierownik).get_json()
+    assert set(sla) == set(schematy["UstawieniaSla"]["properties"])
+    assert set(sla["historia"][0]) == set(
+        schematy["UstawieniaSla"]["properties"]["historia"]["items"]["properties"])
+
+
+def test_schemat_klienta_odpowiada_odpowiedzi(client, technik, spec):
+    klient = client.get("/api/clients", headers=technik).get_json()[0]
+    assert set(klient) == set(spec["components"]["schemas"]["Klient"]["properties"])
+
+
 def test_schemat_logowania_odpowiada_odpowiedzi(client, spec):
     dane = client.post("/api/auth/login",
                        json={"username": "k.nowak", "password": "haslo123"}).get_json()

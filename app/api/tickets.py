@@ -6,18 +6,18 @@ from datetime import timedelta
 from flask import Blueprint, request, jsonify, g
 
 from app import config
-from app.api.validation import obiekt_json, pole_tekstowe, parametr_calkowity
-from app.data import audit, users
+from app.api.validation import MAX_ID, obiekt_json, pole_tekstowe, parametr_calkowity
+from app.data import audit, settings, users
 from app.data import tickets as repo
 from app.data.database import get_db, czas_utc, teraz_utc
 from app.domain import tickets as reguly
-from app.domain.ai import categorize, CATEGORIES, SLA_HOURS
+from app.domain.ai import categorize, godziny_sla, CATEGORIES
 from app.security.decorators import login_required, roles_required
 
 bp = Blueprint("tickets", __name__)
 
 # Role, którym można przypisać zgłoszenie do obsługi.
-ROLE_OBSLUGI = ("technik", "admin")
+ROLE_OBSLUGI = ("technik", "kierownik")
 
 
 @bp.route("/tickets", methods=["GET"])
@@ -56,8 +56,10 @@ def utworz():
 
     wynik = categorize(title, description)
     # UTC, jak wszystkie znaczniki czasu zapisywane przez SQLite. Czas lokalny
-    # serwera rozjeżdżał się z `created_at` o przesunięcie strefy.
-    deadline = teraz_utc(timedelta(hours=SLA_HOURS[wynik["priorytet"]]))
+    # serwera rozjeżdżał się z `created_at` o przesunięcie strefy. Czas SLA
+    # pochodzi z ustawień kierownika (albo domyślnych).
+    godziny = godziny_sla(settings.sla_godziny())[wynik["priorytet"]]
+    deadline = teraz_utc(timedelta(hours=godziny))
     # Zgłoszenie należy do firmy autora z chwili utworzenia (opis w schemacie).
     ticket_id = repo.utworz(title, description, g.user["id"], g.user["client_id"],
                             wynik["kategoria"], wynik["priorytet"], wynik["pewnosc"],
@@ -90,7 +92,7 @@ def szczegoly(ticket_id):
 
 
 @bp.route("/tickets/<int:ticket_id>", methods=["PATCH"])
-@roles_required("technik", "admin")
+@roles_required("technik", "kierownik")
 def aktualizuj(ticket_id):
     dane = obiekt_json()
     t = repo.pobierz_surowe(ticket_id)
@@ -111,16 +113,32 @@ def aktualizuj(ticket_id):
             return jsonify({"error": "Nieprawidlowa kategoria",
                             "dozwolone": CATEGORIES}), 400
 
+    kierownik = g.user["role"] == "kierownik"
     if "assigned_to" in dane:
         osoba = dane["assigned_to"]
-        # bool jest w Pythonie podklasą int — `true` przypisywałoby do id=1.
-        if not isinstance(osoba, int) or isinstance(osoba, bool):
-            return jsonify({"error": "assigned_to musi byc liczba calkowita"}), 400
-        # Bez tego nieistniejący identyfikator kończył się naruszeniem klucza
-        # obcego i błędem 500, a zgłoszenie dało się przypisać pracownikowi.
-        cel = users.po_id(osoba)
-        if not cel or cel["role"] not in ROLE_OBSLUGI:
-            return jsonify({"error": "assigned_to musi wskazywac technika lub administratora"}), 400
+        if osoba is None:
+            # Zwolnienie przypisania oddaje zgłoszenie do kolejki — to decyzja
+            # o podziale pracy, więc należy do kierownika.
+            if not kierownik:
+                return jsonify({"error": "Tylko kierownik moze zwolnic przypisanie"}), 403
+        else:
+            # bool jest w Pythonie podklasą int — `true` przypisywałoby do id=1.
+            if (not isinstance(osoba, int) or isinstance(osoba, bool)
+                    or not 1 <= osoba <= MAX_ID):
+                return jsonify({"error": "assigned_to musi byc dodatnia liczba calkowita"
+                                         " lub null"}), 400
+            # Bez tego nieistniejący identyfikator kończył się naruszeniem klucza
+            # obcego i błędem 500, a zgłoszenie dało się przypisać pracownikowi.
+            cel = users.po_id(osoba)
+            if not cel or cel["role"] not in ROLE_OBSLUGI:
+                return jsonify({"error": "assigned_to musi wskazywac technika lub kierownika"}), 400
+            # Technik bierze wolne zgłoszenie dla siebie; przydzielanie pracy
+            # innym i przenoszenie zgłoszeń między technikami należy do kierownika.
+            if not kierownik and (osoba != g.user["id"]
+                                  or t["assigned_to"] not in (None, g.user["id"])):
+                return jsonify({"error": "Technik moze przypisac do siebie tylko wolne"
+                                         " zgloszenie — przydzielanie innym nalezy do"
+                                         " kierownika"}), 403
 
     zmienione = []
 
@@ -145,11 +163,17 @@ def aktualizuj(ticket_id):
         zmienione.append("category")
 
     if "assigned_to" in dane:
-        repo.zmien_przypisanie(ticket_id, dane["assigned_to"])
+        if not repo.zmien_przypisanie(ticket_id, dane["assigned_to"],
+                                      tylko_wolne_dla=None if kierownik else g.user["id"]):
+            # Wcześniejsze zmiany z tego żądania (status, kategoria) też
+            # nie mogą zostać zapisane — PATCH jest wszystko albo nic.
+            get_db().rollback()
+            return jsonify({"error": "Zgloszenie zostalo w miedzyczasie przypisane"
+                                     " innej osobie — odswiez je"}), 409
         poprzednio = t["assigned_to"]
         audit.zapisz(ticket_id, g.user["id"], "Przypisanie",
                      str(poprzednio) if poprzednio is not None else None,
-                     str(dane["assigned_to"]))
+                     str(dane["assigned_to"]) if dane["assigned_to"] is not None else None)
         zmienione.append("assigned_to")
 
     if not zmienione:
@@ -160,7 +184,7 @@ def aktualizuj(ticket_id):
 
 
 @bp.route("/tickets/<int:ticket_id>/notes", methods=["POST"])
-@roles_required("technik", "admin")
+@roles_required("technik", "kierownik")
 def dodaj_notatke(ticket_id):
     dane = obiekt_json()
 
@@ -180,7 +204,7 @@ def dodaj_notatke(ticket_id):
 
 
 @bp.route("/tickets/<int:ticket_id>/audit", methods=["GET"])
-@roles_required("technik", "admin")
+@roles_required("technik", "kierownik")
 def historia(ticket_id):
     if not repo.istnieje(ticket_id):
         return jsonify({"error": "Nie znaleziono zgloszenia"}), 404

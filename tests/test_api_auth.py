@@ -71,9 +71,11 @@ def test_nieznany_login_tez_sprawdza_hash(client, monkeypatch):
                         lambda h, p: wywolania.append(h) or prawdziwe(h, p))
 
     client.post("/api/auth/login", json={"username": "nie.ma.takiego", "password": "x"})
-    client.post("/api/auth/login", json={"username": "admin", "password": "x"})
+    client.post("/api/auth/login", json={"username": "t.adamski", "password": "x"})
     assert len(wywolania) == 2
-    # Hash zastepczy ma ten sam algorytm co prawdziwe — inaczej koszt by sie roznil.
+    # Drugie logowanie sprawdzilo prawdziwy hash istniejacego konta...
+    assert wywolania[0] != wywolania[1]
+    # ...a hash zastepczy ma ten sam algorytm — inaczej koszt by sie roznil.
     assert wywolania[0].split("$")[0] == wywolania[1].split("$")[0]
 
 

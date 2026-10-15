@@ -41,7 +41,7 @@ def dashboard():
 
 
 @bp.route("/ai/skutecznosc", methods=["GET"])
-@roles_required("technik", "admin")
+@roles_required("technik", "kierownik")
 def skutecznosc():
     """Jakość kategoryzacji liczona z rzeczywistej pracy techników.
 

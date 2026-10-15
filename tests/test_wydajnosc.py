@@ -141,7 +141,7 @@ def test_init_db_mozna_wywolac_wielokrotnie(app):
     conn = sqlite3.connect(db_module.DB_PATH)
     liczba = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     conn.close()
-    assert liczba == 4, "Ponowna inicjalizacja nie moze dublowac ani kasowac danych"
+    assert liczba == 5, "Ponowna inicjalizacja nie moze dublowac ani kasowac danych"
 
 
 def test_migracja_dodaje_brakujaca_kolumne_do_istniejacej_bazy(tmp_path, monkeypatch):

@@ -132,7 +132,24 @@ show("Raport klienta za ostatnie 30 dni",
 show("Pracownik NIE ma dostepu do raportow (403)",
      requests.get(f"{BASE}/reports", headers=PRACOWNIK), expect=403)
 show("Nieprawidlowy okres raportu (400)",
-     requests.get(f"{BASE}/reports?od=2026-13-01", headers=TECHNIK), expect=400)
+     requests.get(f"{BASE}/reports?client_id={klient_id}&od=2026-13-01", headers=TECHNIK),
+     expect=400)
+
+
+section("9. KIEROWNIK — ZESPOL, KOLEJKA, SLA")
+r_kier = requests.post(f"{BASE}/auth/login",
+                       json={"username": "t.adamski", "password": "kierownik123"})
+show("Logowanie kierownika (Tomasz)", r_kier)
+KIEROWNIK = auth(r_kier.json().get("token", ""))
+show("Statystyki zespolu (kierownik)", requests.get(f"{BASE}/team", headers=KIEROWNIK))
+show("Kolejka: bez opiekuna i zagrozone SLA", requests.get(f"{BASE}/queue", headers=KIEROWNIK))
+show("Technik widzi wlasne statystyki",
+     requests.get(f"{BASE}/team/{r_tech.json()['id']}", headers=TECHNIK))
+show("Technik NIE widzi statystyk zespolu (403)",
+     requests.get(f"{BASE}/team", headers=TECHNIK), expect=403)
+show("Technik NIE zmienia czasow SLA (403)",
+     requests.put(f"{BASE}/settings/sla", headers=TECHNIK,
+                  json={"godziny": {"Krytyczny": 2}}), expect=403)
 
 
 print("\n" + "=" * 64)

@@ -24,3 +24,17 @@ def po_nazwie_z_hasłem(username):
         f"SELECT {KOLUMNY_PUBLICZNE}, u.password {_Z_KLIENTEM} WHERE u.username = ?",
         (username,),
     ).fetchone()
+
+
+def personel():
+    """Technicy i kierownicy — osoby, którym można przypisać zgłoszenie."""
+    return get_db().execute(
+        "SELECT id, name, role FROM users WHERE role IN ('technik', 'kierownik')"
+        " ORDER BY role = 'kierownik', name"
+    ).fetchall()
+
+
+def obslugiwani_klienci(technik_id):
+    """Identyfikatory firm, które obsługuje technik."""
+    return {r["client_id"] for r in get_db().execute(
+        "SELECT client_id FROM technician_clients WHERE technician_id = ?", (technik_id,))}

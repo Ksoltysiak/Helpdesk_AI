@@ -167,8 +167,8 @@ py wsgi.py                    # startuje serwer na http://127.0.0.1:5000
 
 ## Testy
 
-Projekt ma zestaw **543 automatycznych sprawdzeń** w trzech warstwach
-(518 testów `pytest` + 25 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
+Projekt ma zestaw **629 automatycznych sprawdzeń** w trzech warstwach
+(598 testów `pytest` + 31 sprawdzeń E2E), przy **100% pokryciu kodu aplikacji**.
 
 ```bash
 py -m pip install -r requirements-dev.txt
@@ -177,9 +177,9 @@ py -m pytest
 
 | Warstwa | Liczba | Zakres |
 |---|---|---|
-| Jednostkowe | 142 | Kategoryzacja AI i jej skuteczność, reguły raportów, tokeny JWT, maszyna stanów |
-| Integracyjne | 376 | Flask + baza: RBAC, klienci, raporty, walidacja, nagłówki, limity, stronicowanie, indeksy, zgodność dokumentacji |
-| E2E (`demo.py`) | 25 | Pełny przepływ przez działający serwer |
+| Jednostkowe | 154 | Kategoryzacja AI i jej skuteczność, reguły raportów, tokeny JWT, maszyna stanów, architektura |
+| Integracyjne | 444 | Flask + baza: RBAC, klienci, raporty, kierownik i statystyki zespołu, walidacja, nagłówki, limity, stronicowanie, indeksy, migracje, zgodność dokumentacji |
+| E2E (`demo.py`) | 31 | Pełny przepływ przez działający serwer |
 
 Testy uruchamiają się automatycznie przy każdym pull requeście
 (`.github/workflows/tests.yml`).
@@ -194,9 +194,9 @@ pomiary wydajności: **[PERFORMANCE.md](PERFORMANCE.md)**.
 ## Weryfikacja działania
 
 Gdy serwer działa, skrypt `demo.py` sprawdza wszystkie operacje API — logowanie
-JWT, kategoryzację AI, przejścia statusów, ścieżkę audytu, klientów i raporty
-oraz testy negatywne (brak tokenu, podrobiony token, przekroczone limity
-długości, nieznany endpoint, brak uprawnień do raportów):
+JWT, kategoryzację AI, przejścia statusów, ścieżkę audytu, klientów, raporty
+i rolę kierownika oraz testy negatywne (brak tokenu, podrobiony token,
+przekroczone limity długości, nieznany endpoint, brak uprawnień):
 
 ```bash
 BASE_URL=http://localhost:8080 py demo.py
@@ -205,7 +205,7 @@ BASE_URL=http://localhost:8080 py demo.py
 Oczekiwany wynik:
 
 ```
-WYNIK: 25 testow OK, 0 bledow
+WYNIK: 31 testow OK, 0 bledow
 ```
 
 Ręczne sprawdzenie endpointów (wymaga najpierw zalogowania się i pobrania tokenu):
@@ -304,8 +304,8 @@ szczegółowe wyniki w pliku **[PERFORMANCE.md](PERFORMANCE.md)**.
 | Rola        | Uprawnienia                                                           |
 |-------------|------------------------------------------------------------------------|
 | `pracownik` | Pracownik firmy-klienta: tworzenie zgłoszeń, podgląd **wyłącznie własnych** |
-| `technik`   | Podgląd wszystkich zgłoszeń i klientów, zmiana statusu/kategorii, notatki, audyt |
-| `admin`     | Pełny dostęp                                                           |
+| `technik`   | Podgląd wszystkich zgłoszeń i klientów, zmiana statusu/kategorii, notatki, audyt; bierze wolne zgłoszenia; raporty **obsługiwanych** firm; własne statystyki |
+| `kierownik` | Wszystko, co technik, oraz: przydział i przenoszenie zgłoszeń, raporty dowolnej firmy i zbiorcze, statystyki i raporty zespołu, kolejka, czasy SLA |
 
 ---
 
@@ -320,9 +320,9 @@ danych innych firm.
 
 ### Raporty dla klientów
 
-Technik generuje raport dla wybranej firmy (albo wszystkich) za dowolny okres
-do 366 dni — w interfejsie „Raporty" lub przez `GET /api/reports`. Raport
-zawiera:
+Technik generuje raport dla firmy, którą obsługuje, a kierownik — dla
+dowolnej firmy albo wszystkich naraz — za okres do 366 dni, w interfejsie
+„Raporty" lub przez `GET /api/reports`. Raport zawiera:
 
 - podsumowanie: liczbę zgłoszeń, odsetek rozwiązanych, średni czas
   rozwiązania i odsetek rozwiązanych w terminie SLA,
@@ -335,6 +335,30 @@ Przycisk „Drukuj / PDF" drukuje sam raport (bez menu), zawsze w jasnym
 motywie — w oknie drukowania można wybrać zapis do pliku PDF. Definicje miar
 i wyniki testu obciążeniowego: `openapi.yaml` (`/reports`) oraz
 [PERFORMANCE.md](PERFORMANCE.md#raporty-dla-klientów--test-obciążeniowy).
+
+### Kierownik zespołu
+
+Kierownik jest technikiem z dodatkowymi uprawnieniami (rola `kierownik`
+zastąpiła wcześniejszą rolę `admin`, która nie dawała niczego ponad technika;
+istniejące konta są przenoszone automatycznie przy starcie aplikacji):
+
+- **Zespół** (`GET /api/team`) — dla każdego technika obciążenie (otwarte
+  zgłoszenia, w tym po terminie), podjęte zgłoszenia i średni czas reakcji,
+  rozwiązane zgłoszenia ze zmianą względem poprzedniego okresu, średni czas
+  rozwiązania, odsetek w terminie SLA i liczba notatek. Kliknięcie technika
+  otwiera jego raport (`GET /api/team/{technik_id}`); oba raporty można
+  wydrukować. Technik widzi wyłącznie własne statystyki („Moje statystyki").
+- **Kolejka** na pulpicie (`GET /api/queue`) — zgłoszenia bez opiekuna
+  i zagrożone SLA (termin mija w ciągu 2 h albo minął), od najpilniejszego.
+- **Przydział pracy** — kierownik przydziela, przenosi i zwalnia zgłoszenia;
+  technik może tylko wziąć wolne zgłoszenie dla siebie. Dwóch techników
+  biorących to samo zgłoszenie jednocześnie: wygrywa jeden, drugi dostaje 409.
+- **Czasy SLA** (`/api/settings/sla`) — kierownik zmienia liczbę godzin dla
+  priorytetów; zmiana dotyczy tylko nowych zgłoszeń i trafia do historii.
+
+Firmy obsługiwane przez techników opisuje tabela `technician_clients`
+(na razie wypełniana przez `seed.py`). Definicje miar i wyniki testu
+obciążeniowego: [PERFORMANCE.md](PERFORMANCE.md#statystyki-zespołu--test-obciążeniowy).
 
 ---
 
@@ -359,12 +383,17 @@ orientacyjny — jej zgodność ze specyfikacją pilnuje test automatyczny
 | GET    | `/api/tickets`             | każdy         | Lista zgłoszeń (filtrowana wg roli)         |
 | POST   | `/api/tickets`             | pracownik     | Nowe zgłoszenie + kategoryzacja AI          |
 | GET    | `/api/tickets/{id}`        | każdy         | Szczegóły zgłoszenia + notatki              |
-| PATCH  | `/api/tickets/{id}`        | technik/admin | Zmiana statusu / kategorii / przypisania    |
-| POST   | `/api/tickets/{id}/notes`  | technik/admin | Notatka (wewnętrzna lub widoczna)           |
-| GET    | `/api/tickets/{id}/audit`  | technik/admin | Pełna ścieżka audytu                        |
-| GET    | `/api/clients`             | technik/admin | Klienci z liczbą pracowników i zgłoszeń     |
-| GET    | `/api/reports`             | technik/admin | Raport klienta: kategorie, trend, SLA, rekomendacje |
-| GET    | `/api/ai/skutecznosc`      | technik/admin | Skuteczność AI liczona z korekt techników   |
+| PATCH  | `/api/tickets/{id}`        | technik/kierownik | Zmiana statusu / kategorii / przypisania    |
+| POST   | `/api/tickets/{id}/notes`  | technik/kierownik | Notatka (wewnętrzna lub widoczna)           |
+| GET    | `/api/tickets/{id}/audit`  | technik/kierownik | Pełna ścieżka audytu                        |
+| GET    | `/api/clients`             | technik/kierownik | Klienci z liczbą pracowników i zgłoszeń     |
+| GET    | `/api/reports`             | technik/kierownik | Raport klienta: kategorie, trend, SLA, rekomendacje |
+| GET    | `/api/team`                | kierownik     | Statystyki wszystkich techników za okres    |
+| GET    | `/api/team/{technik_id}`   | technik (własne) / kierownik | Raport jednego technika      |
+| GET    | `/api/queue`               | kierownik     | Zgłoszenia bez opiekuna i zagrożone SLA     |
+| GET    | `/api/settings/sla`        | technik/kierownik | Obowiązujące czasy SLA i historia zmian |
+| PUT    | `/api/settings/sla`        | kierownik     | Zmiana czasów SLA (dla nowych zgłoszeń)     |
+| GET    | `/api/ai/skutecznosc`      | technik/kierownik | Skuteczność AI liczona z korekt techników   |
 | POST   | `/api/ai/categorize`       | każdy         | Test modułu AI na dowolnym tekście          |
 
 **Autoryzacja:** każde żądanie (poza logowaniem) wymaga nagłówka:
@@ -373,7 +402,7 @@ Authorization: Bearer <token>
 ```
 Token jest zwracany przez endpoint `/api/auth/login`.
 
-**Filtry dla `GET /api/tickets`** (tylko technik/admin):
+**Filtry dla `GET /api/tickets`** (tylko technik/kierownik):
 `?status=Nowe`, `?priority=Krytyczny`, `?category=Siec`.
 
 ---
@@ -431,9 +460,9 @@ Firmy i nazwiska są fikcyjne.
 | a.kowalczyk     | haslo123 | pracownik | Kancelaria Prawna Paragraf      |
 | e.kaminska      | haslo123 | pracownik | Hurtownia Budowlana Cegiełka    |
 | r.wojcik        | haslo123 | pracownik | Klinika Weterynaryjna Pazurek   |
-| m.lewandowski   | tech123  | technik   | — (personel helpdesku)          |
-| j.zielinska     | tech123  | technik   | — (personel helpdesku)          |
-| admin           | admin123 | admin     | — (personel helpdesku)          |
+| m.lewandowski   | tech123  | technik   | obsługuje: Piekarnia, Biuro, Kancelaria |
+| j.zielinska     | tech123  | technik   | obsługuje: Hurtownia, Klinika, Kancelaria |
+| t.adamski       | kierownik123 | kierownik | wszystkie firmy                  |
 
 ---
 

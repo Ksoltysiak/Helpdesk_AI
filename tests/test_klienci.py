@@ -192,6 +192,6 @@ def test_dane_demonstracyjne_maja_piec_firm_z_pracownikami(tmp_path, monkeypatch
 
     assert klienci == 5
     assert bez_firmy == 0, "Kazdy pracownik musi nalezec do firmy"
-    assert personel_z_firma == 0, "Technik i admin obsluguja wszystkie firmy"
+    assert personel_z_firma == 0, "Personel helpdesku nie jest pracownikiem firmy-klienta"
     assert firmy_bez_zgloszen == 0, "Kazda firma demonstracyjna ma zgloszenia do raportu"
     assert niezgodne == 0

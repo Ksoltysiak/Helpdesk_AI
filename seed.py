@@ -26,7 +26,7 @@ USERS = [
     ("a.kowalczyk",   "haslo123", "Anna Kowalczyk",     "pracownik", "a.kowalczyk@firma.pl",   "Kancelaria Prawna Paragraf"),
     ("m.lewandowski", "tech123",  "Marek Lewandowski",  "technik",   "m.lewandowski@firma.pl", None),
     ("j.zielinska",   "tech123",  "Joanna Zielinska",   "technik",   "j.zielinska@firma.pl",   None),
-    ("admin",         "admin123", "Tomasz Adamski",     "admin",     "admin@firma.pl",         None),
+    ("t.adamski",     "kierownik123", "Tomasz Adamski", "kierownik", "t.adamski@firma.pl",     None),
     ("e.kaminska",    "haslo123", "Ewa Kaminska",       "pracownik", "e.kaminska@firma.pl",    "Hurtownia Budowlana Cegiełka"),
     ("r.wojcik",      "haslo123", "Robert Wojcik",      "pracownik", "r.wojcik@firma.pl",      "Klinika Weterynaryjna Pazurek"),
 ]
@@ -102,12 +102,37 @@ HISTORIA = {
         18, (0.3, 1.0)),
 }
 HISTORIA_DNI = (9, 120)       # historia konczy sie tam, gdzie zaczynaja TICKETS
-TECHNICY = (4, 5)
+
+# Tempo pierwszej reakcji technika (godziny od zgloszenia do podjecia) —
+# rozne dla kazdej osoby, zeby statystyki zespolu cos rozroznialy.
+TEMPO_REAKCJI = {"m.lewandowski": (0.1, 1.2), "j.zielinska": (0.3, 3.5)}
+NOTATKI = (
+    "Zdalna diagnostyka — problem potwierdzony.",
+    "Kontakt z uzytkownikiem, ustalono szczegoly.",
+    "Wymiana podzespolu, test po naprawie.",
+    "Zgloszone do dostawcy, czekamy na odpowiedz.",
+    "Aktualizacja sterownikow i restart.",
+)
+
+# Firmy obslugiwane przez technikow — technik tworzy raporty tylko dla nich,
+# a w historii obsluguje ich zgloszenia. Kancelaria ma dwoch opiekunow.
+# Kierownik obsluguje wszystkie firmy z urzedu.
+TECHNICY_KLIENTOW = {
+    "m.lewandowski": ["Piekarnia Złoty Kłos", "Biuro Rachunkowe Bilans",
+                      "Kancelaria Prawna Paragraf"],
+    "j.zielinska":   ["Hurtownia Budowlana Cegiełka", "Klinika Weterynaryjna Pazurek",
+                      "Kancelaria Prawna Paragraf"],
+}
 
 
 def _dodaj_zgloszenie(conn, title, desc, status, created_by, assigned_to, client_id,
-                      utworzono, rozwiazano=None, zamknieto=None):
-    """Zgloszenie wraz z historia zmian spojna z jego statusem."""
+                      utworzono, rozwiazano=None, zamknieto=None, podjeto=None, notatka=None):
+    """Zgloszenie wraz z historia zmian spojna z jego statusem.
+
+    `podjeto` — chwila podjecia przez technika (domyslnie 15 minut po
+    zgloszeniu); `notatka` — tresc notatki technika dodanej w trakcie obslugi.
+    """
+    podjeto = podjeto or utworzono + timedelta(minutes=15)
     ai = categorize(title, desc)
     created = str(utworzono)
     tid = conn.execute(
@@ -125,8 +150,13 @@ def _dodaj_zgloszenie(conn, title, desc, status, created_by, assigned_to, client
     wpisy = [(created_by, "Utworzenie", None, "Nowe", created),
              (None, "Kategoryzacja AI", None, json.dumps(ai, ensure_ascii=False), created)]
     if status != "Nowe":
-        wpisy.append((assigned_to, "Zmiana statusu", "Nowe", "W trakcie",
-                      str(utworzono + timedelta(minutes=15))))
+        wpisy.append((assigned_to, "Zmiana statusu", "Nowe", "W trakcie", str(podjeto)))
+    if notatka and status != "Nowe":
+        koniec = rozwiazano or podjeto + timedelta(hours=1)
+        kiedy = str(podjeto + (koniec - podjeto) / 2)
+        conn.execute("INSERT INTO notes (ticket_id, author_id, content, internal, created_at)"
+                     " VALUES (?,?,?,1,?)", (tid, assigned_to, notatka, kiedy))
+        wpisy.append((assigned_to, "Notatka", None, notatka[:60], kiedy))
     if rozwiazano:
         wpisy.append((assigned_to, "Zmiana statusu", "W trakcie", "Rozwiazane", str(rozwiazano)))
     if zamknieto:
@@ -157,7 +187,7 @@ def seed():
     }
 
     # Firma kazdego uzytkownika — zgloszenie dziedziczy ja w chwili utworzenia.
-    klient_uzytkownika = {}
+    klient_uzytkownika, id_uzytkownika = {}, {}
     for username, password, name, role, email, klient in USERS:
         hashed = generate_password_hash(password)
         uid = conn.execute(
@@ -166,6 +196,15 @@ def seed():
             (username, hashed, name, role, email, klient_id.get(klient)),
         ).lastrowid
         klient_uzytkownika[uid] = klient_id.get(klient)
+        id_uzytkownika[username] = uid
+    nazwa_uzytkownika = {uid: nazwa for nazwa, uid in id_uzytkownika.items()}
+
+    opiekunowie = {}          # klient -> technicy, ktorzy go obsluguja
+    for technik, firmy in TECHNICY_KLIENTOW.items():
+        for firma in firmy:
+            conn.execute("INSERT INTO technician_clients (technician_id, client_id) VALUES (?,?)",
+                         (id_uzytkownika[technik], klient_id[firma]))
+            opiekunowie.setdefault(klient_id[firma], []).append(id_uzytkownika[technik])
 
     # UTC w formacie SQLite — tak samo jak znaczniki zapisywane przez aplikacje.
     now = datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None)
@@ -180,14 +219,21 @@ def seed():
             title, desc = los.choice(szablony)
             utworzono = now - timedelta(days=los.randint(*HISTORIA_DNI),
                                         hours=los.randint(0, 9), minutes=los.randint(0, 59))
-            historia.append((utworzono, title, desc, autor, los.choice(TECHNICY),
-                             los.uniform(szybko, wolno), los.uniform(1, 30)))
-    for utworzono, title, desc, autor, technik, ulamek, do_zamkniecia in sorted(historia):
+            technik = los.choice(opiekunowie[klient_uzytkownika[autor]])
+            historia.append((utworzono, title, desc, autor, technik,
+                             los.uniform(szybko, wolno), los.uniform(1, 30),
+                             los.uniform(*TEMPO_REAKCJI[nazwa_uzytkownika[technik]]),
+                             los.choice(NOTATKI) if los.random() < 0.4 else None))
+    for (utworzono, title, desc, autor, technik, ulamek, do_zamkniecia,
+         reakcja, notatka) in sorted(historia, key=lambda h: h[0]):
         priorytet = categorize(title, desc)["priorytet"]
         rozwiazano = _rozwiazanie(utworzono, priorytet, ulamek, now)
+        # Podjecie zawsze miedzy zgloszeniem a rozwiazaniem.
+        podjeto = max(utworzono + timedelta(minutes=1),
+                      min(utworzono + timedelta(hours=reakcja), rozwiazano - timedelta(minutes=1)))
         _dodaj_zgloszenie(conn, title, desc, "Zamkniete", autor, technik,
                           klient_uzytkownika[autor], utworzono, rozwiazano,
-                          rozwiazano + timedelta(hours=do_zamkniecia))
+                          rozwiazano + timedelta(hours=do_zamkniecia), podjeto, notatka)
 
     for title, desc, status, created_by, assigned_to, days_ago in sorted(
             TICKETS, key=lambda t: -t[5]):
