@@ -11,15 +11,14 @@ tekstowe z granicą o północy działają poprawnie dla obu, a obliczenia
 czasu przechodzą przez `julianday()`, które rozumie oba zapisy.
 """
 
-from datetime import date, timedelta
+from datetime import date
 
-from app.data.database import get_db
+from app.data.database import get_db, godziny_miedzy, granice_dob
 
 
 def _warunek(client_id, od, do):
     """WHERE dla zgłoszeń klienta z okresu [od, do] (daty włącznie)."""
-    granice = [f"{od.isoformat()} 00:00:00",
-               f"{(do + timedelta(days=1)).isoformat()} 00:00:00"]
+    granice = list(granice_dob(od, do))
     where = "t.created_at >= ? AND t.created_at < ?"
     if client_id is not None:
         return f"t.client_id = ? AND {where}", [client_id, *granice]
@@ -49,7 +48,7 @@ def podsumowanie(client_id, od, do, teraz):
             WHERE {where}
         ), czasy AS (
             SELECT *,
-                   (julianday(rozwiazano) - julianday(created_at)) * 24 AS godzin,
+                   {godziny_miedzy("created_at", "rozwiazano")} AS godzin,
                    julianday(rozwiazano) <= julianday(sla_deadline)      AS w_terminie
             FROM z
         )

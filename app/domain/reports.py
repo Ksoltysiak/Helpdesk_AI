@@ -9,6 +9,7 @@ z konkretnej liczby w raporcie, więc klient widzi, skąd się wzięła.
 """
 
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 DOMYSLNIE_DNI = 30
 MAX_DNI = 366
@@ -164,15 +165,32 @@ def trend(od, do, dziennie):
     return wynik
 
 
+def zaokraglij(wartosc, miejsc=1):
+    """Zaokrąglenie „szkolne" (połówki w górę), a nie bankowe.
+
+    Wbudowane `round()` zaokrągla połówki do parzystej cyfry — 0,25 h
+    dałoby 0,2 h, choć w raporcie dla klienta oczekuje się 0,3 h.
+    """
+    if wartosc is None:
+        return None
+    return float(Decimal(repr(wartosc)).quantize(Decimal(1).scaleb(-miejsc),
+                                                 rounding=ROUND_HALF_UP))
+
+
+def _cale(wartosc):
+    """Procent do całości w zdaniu rekomendacji — połówki w górę."""
+    return int(zaokraglij(wartosc, 0))
+
+
 def zmiana_proc(teraz, poprzednio):
     """Zmiana procentowa; None, gdy nie ma do czego porównać (zero wcześniej)."""
     if not poprzednio:
         return None
-    return round((teraz - poprzednio) / poprzednio * 100, 1)
+    return zaokraglij((teraz - poprzednio) / poprzednio * 100)
 
 
 def procent(czesc, calosc):
-    return round(czesc / calosc * 100, 1) if calosc else None
+    return zaokraglij(czesc / calosc * 100) if calosc else None
 
 
 def kategorie_z_porownaniem(teraz, poprzednio):
@@ -250,8 +268,8 @@ def rekomendacje(podsumowanie, kategorie, problemy):
     if (sla is not None and sla < PROG_SLA_PROC
             and podsumowanie["rozwiazanych_z_terminem"] >= MIN_ROZWIAZANYCH_DO_SLA):
         wnioski.append(
-            f"W terminie SLA rozwiązano {round(sla)}% zgłoszeń — poniżej "
-            f"oczekiwanych {round(PROG_SLA_PROC)}%.")
+            f"W terminie SLA rozwiązano {_cale(sla)}% zgłoszeń — poniżej "
+            f"oczekiwanych {_cale(PROG_SLA_PROC)}%.")
 
     po_terminie = podsumowanie["otwartych_po_terminie"]
     if po_terminie:
@@ -264,7 +282,7 @@ def rekomendacje(podsumowanie, kategorie, problemy):
         if (k["kategoria"] is not None and k["liczba"] >= MIN_ZGLOSZEN_DO_WNIOSKU
                 and k["liczba"] / zgloszen >= PROG_UDZIALU_KATEGORII):
             wnioski.append(
-                f"{round(k['liczba'] / zgloszen * 100)}% zgłoszeń dotyczy kategorii "
+                f"{_cale(k['liczba'] / zgloszen * 100)}% zgłoszeń dotyczy kategorii "
                 f"{k['etykieta']} — to główne źródło problemów w tym okresie.")
 
     wzrosty = sorted(
@@ -276,7 +294,7 @@ def rekomendacje(podsumowanie, kategorie, problemy):
     for k in wzrosty[:MAX_WZROSTOW]:
         wnioski.append(
             f"Liczba zgłoszeń w kategorii {k['etykieta']} wzrosła o "
-            f"{round(k['zmiana_proc'])}% ({k['poprzednio']} → {k['liczba']}) "
+            f"{_cale(k['zmiana_proc'])}% ({k['poprzednio']} → {k['liczba']}) "
             f"względem poprzedniego okresu.")
 
     if problemy and problemy[0]["liczba"] >= MIN_ZGLOSZEN_DO_WNIOSKU:

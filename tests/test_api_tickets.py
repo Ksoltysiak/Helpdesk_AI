@@ -40,7 +40,7 @@ def test_nieistniejace_zgloszenie_daje_404(client, technik):
 
 
 # ---------------------------------------------------------------
-# Filtrowanie (tylko technik/admin)
+# Filtrowanie (tylko technik/kierownik)
 # ---------------------------------------------------------------
 
 @pytest.mark.parametrize("filtr,oczekiwane", [
@@ -206,21 +206,22 @@ def test_zmiana_kategorii_trafia_do_audytu(client, technik):
     assert wpis["old"] == "Bezpieczenstwo" and wpis["new"] == "Sprzet"
 
 
-def test_technik_przypisuje_zgloszenie_innej_osobie(client, technik):
-    resp = client.patch("/api/tickets/1", headers=technik, json={"assigned_to": 4})
+def test_kierownik_przypisuje_zgloszenie_technikowi(client, kierownik, technik):
+    resp = client.patch("/api/tickets/1", headers=kierownik, json={"assigned_to": 5})
     assert resp.status_code == 200
-    assert client.get("/api/tickets/1", headers=technik).get_json()["assigned_to"] == 4
+    assert client.get("/api/tickets/1", headers=technik).get_json()["assigned_to"] == 5
 
 
-@pytest.mark.parametrize("wartosc", ["3", 1.5, None, {"id": 3}, True])
-def test_przypisanie_musi_byc_liczba_calkowita(client, technik, wartosc):
-    assert client.patch("/api/tickets/1", headers=technik,
+@pytest.mark.parametrize("wartosc", ["3", 1.5, {"id": 3}, True])
+def test_przypisanie_musi_byc_liczba_calkowita(client, kierownik, wartosc):
+    assert client.patch("/api/tickets/1", headers=kierownik,
                         json={"assigned_to": wartosc}).status_code == 400
 
 
 @pytest.mark.parametrize("osoba", [999, 1])   # nieistniejacy, pracownik
-def test_przypisac_mozna_tylko_istniejacego_technika_lub_admina(client, technik, osoba):
-    resp = client.patch("/api/tickets/1", headers=technik, json={"assigned_to": osoba})
+def test_przypisac_mozna_tylko_istniejacego_technika_lub_kierownika(client, kierownik, technik,
+                                                                    osoba):
+    resp = client.patch("/api/tickets/1", headers=kierownik, json={"assigned_to": osoba})
     assert resp.status_code == 400
     assert client.get("/api/tickets/1", headers=technik).get_json()["assigned_to"] is None
 
@@ -259,8 +260,8 @@ def test_podjecie_nie_nadpisuje_opiekuna_ustawionego_w_miedzyczasie(app):
         assert repo.pobierz_surowe(1)["assigned_to"] == 4
 
 
-def test_pierwsze_przypisanie_ma_pusta_poprzednia_wartosc_w_audycie(client, technik):
-    client.patch("/api/tickets/1", headers=technik, json={"assigned_to": 4})
+def test_pierwsze_przypisanie_ma_pusta_poprzednia_wartosc_w_audycie(client, kierownik, technik):
+    client.patch("/api/tickets/1", headers=kierownik, json={"assigned_to": 4})
     wpis = next(w for w in client.get("/api/tickets/1/audit", headers=technik).get_json()
                 if w["action"] == "Przypisanie")
     assert wpis["old"] is None and wpis["new"] == "4"

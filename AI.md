@@ -103,7 +103,7 @@ nieprzejrzysty werdykt.
 
 ## Pomiar skuteczności na żywo
 
-`GET /api/ai/skutecznosc` (technik/admin) liczy jakość modułu z **rzeczywistej
+`GET /api/ai/skutecznosc` (technik/kierownik) liczy jakość modułu z **rzeczywistej
 pracy zespołu**, a nie z deklaracji. Każda ręczna zmiana kategorii przez
 technika to sygnał pomyłki na konkretnym zgłoszeniu.
 

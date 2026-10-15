@@ -115,9 +115,8 @@ def test_pracownik_nie_ma_dostepu_do_raportow(client, pracownik):
     assert client.get("/api/reports", headers=pracownik).status_code == 403
 
 
-def test_administrator_ma_dostep_do_raportow(client):
-    from conftest import _naglowek_dla
-    assert client.get("/api/reports", headers=_naglowek_dla(4)).status_code == 200
+def test_kierownik_tworzy_raport_zbiorczy(client, kierownik):
+    assert client.get("/api/reports", headers=kierownik).status_code == 200
 
 
 # ---------------------------------------------------------------
@@ -260,14 +259,14 @@ def test_raport_klienta_nie_zawiera_danych_innych_firm(client, technik, dane):
     assert raport["najczestsze_problemy"] == [{"problem": "Outlook", "liczba": 1}]
 
 
-def test_raport_bez_klienta_obejmuje_wszystkie_firmy(client, technik, dane):
-    raport = _raport(client, technik, MARZEC)
+def test_raport_bez_klienta_obejmuje_wszystkie_firmy(client, kierownik, dane):
+    raport = _raport(client, kierownik, MARZEC)
     assert raport["klient"] is None
     assert raport["podsumowanie"]["zgloszen"] == 7
 
 
-def test_pusty_okres_daje_zera_a_nie_bledy(client, technik, dane):
-    raport = _raport(client, technik, "client_id=2&od=2026-03-01&do=2026-03-31")
+def test_pusty_okres_daje_zera_a_nie_bledy(client, kierownik, dane):
+    raport = _raport(client, kierownik, "client_id=2&od=2026-03-01&do=2026-03-31")
     p = raport["podsumowanie"]
     assert p["zgloszen"] == 0 and p["otwartych"] == 0
     assert p["procent_rozwiazanych"] is None
@@ -281,10 +280,10 @@ def test_pusty_okres_daje_zera_a_nie_bledy(client, technik, dane):
 # Okres raportu
 # ---------------------------------------------------------------
 
-def test_domyslnie_ostatnie_30_dni(client, technik):
+def test_domyslnie_ostatnie_30_dni(client, kierownik):
     from datetime import datetime, timedelta, timezone
     dzis = datetime.now(timezone.utc).date()
-    okres = _raport(client, technik, "")["okres"]
+    okres = _raport(client, kierownik, "")["okres"]
     assert okres["do"] == dzis.isoformat()
     assert okres["od"] == (dzis - timedelta(days=29)).isoformat()
 
@@ -313,9 +312,9 @@ def test_miesieczny_trend_dla_roku(client, technik, dane):
     assert len(raport["trend"]) == 12
 
 
-def test_okres_366_dni_jest_dozwolony(client, technik):
+def test_okres_366_dni_jest_dozwolony(client, kierownik):
     assert client.get("/api/reports?od=2025-01-01&do=2026-01-01",
-                      headers=technik).status_code == 200
+                      headers=kierownik).status_code == 200
 
 
 @pytest.mark.parametrize("zapytanie", [
@@ -333,8 +332,8 @@ def test_okres_366_dni_jest_dozwolony(client, technik):
     "od=%00%00",
     "od=2026-03-01%27%20OR%201%3D1--",  # proba wstrzykniecia SQL
 ])
-def test_nieprawidlowy_okres_daje_400(client, technik, zapytanie):
-    resp = client.get(f"/api/reports?{zapytanie}", headers=technik)
+def test_nieprawidlowy_okres_daje_400(client, kierownik, zapytanie):
+    resp = client.get(f"/api/reports?{zapytanie}", headers=kierownik)
     assert resp.status_code == 400
     assert "error" in resp.get_json()
 

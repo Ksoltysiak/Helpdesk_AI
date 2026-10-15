@@ -39,7 +39,36 @@ CATEGORIES = [
     "Konta i dostep", "Bezpieczenstwo", "Peryferia",
 ]
 
+# Domyślne czasy SLA. Kierownik może je zmienić — zmienione wartości są
+# w bazie, a `godziny_sla()` łączy je z domyślnymi.
 SLA_HOURS = {"Krytyczny": 1, "Wysoki": 4, "Sredni": 8, "Niski": 24}
+SLA_MIN_GODZIN = 1
+SLA_MAX_GODZIN = 720          # 30 dni — dłuższy termin przestaje być terminem
+
+
+def godziny_sla(zmienione):
+    """Obowiązujące czasy SLA: domyślne nadpisane wartościami z ustawień."""
+    return {p: zmienione.get(p, h) for p, h in SLA_HOURS.items()}
+
+
+def sprawdz_zmiany_sla(dane):
+    """Zwraca (zmiany, błąd) dla czasów SLA przysłanych przez kierownika.
+
+    Można zmienić dowolną część priorytetów. Godziny muszą być liczbą
+    całkowitą w rozsądnym zakresie — `true` (w Pythonie podklasa int)
+    i ułamki są odrzucane.
+    """
+    if not isinstance(dane, dict) or not dane:
+        return None, "Podaj czasy SLA jako obiekt {priorytet: godziny}"
+    for priorytet, godziny in dane.items():
+        if priorytet not in SLA_HOURS:
+            return None, f"Nieznany priorytet: {priorytet}"
+        if isinstance(godziny, bool) or not isinstance(godziny, int):
+            return None, f"Czas SLA dla priorytetu {priorytet} musi byc liczba calkowita"
+        if not SLA_MIN_GODZIN <= godziny <= SLA_MAX_GODZIN:
+            return None, (f"Czas SLA musi miescic sie w zakresie "
+                          f"{SLA_MIN_GODZIN}-{SLA_MAX_GODZIN} godzin")
+    return dict(dane), None
 
 _KOLEJNOSC_PRIORYTETOW = ["Niski", "Sredni", "Wysoki", "Krytyczny"]
 _RANGA = {p: i for i, p in enumerate(_KOLEJNOSC_PRIORYTETOW)}

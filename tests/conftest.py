@@ -37,11 +37,16 @@ CLIENTS = [
 # Uzytkownicy testowi: (id, login, haslo, imie, rola, klient).
 # Pracownicy naleza do roznych firm; personel helpdesku nie ma klienta.
 USERS = [
-    (1, "k.nowak",       "haslo123", "Katarzyna Nowak",   "pracownik", 1),
-    (2, "p.wisniewski",  "haslo123", "Piotr Wisniewski",  "pracownik", 2),
-    (3, "m.lewandowski", "tech123",  "Marek Lewandowski", "technik",   None),
-    (4, "admin",         "admin123", "Tomasz Adamski",    "admin",     None),
+    (1, "k.nowak",       "haslo123",     "Katarzyna Nowak",   "pracownik", 1),
+    (2, "p.wisniewski",  "haslo123",     "Piotr Wisniewski",  "pracownik", 2),
+    (3, "m.lewandowski", "tech123",      "Marek Lewandowski", "technik",   None),
+    (4, "t.adamski",     "kierownik123", "Tomasz Adamski",    "kierownik", None),
+    (5, "j.zielinska",   "tech123",      "Joanna Zielinska",  "technik",   None),
 ]
+
+# Firmy obslugiwane przez technikow: (technik, klient). Technik 3 obsluguje
+# firmy 1 i 3, technik 5 — firme 2. Kierownik obsluguje wszystkie z urzedu.
+TECHNICY_KLIENTOW = [(3, 1), (3, 3), (5, 2)]
 
 # (id, tytul, status, priorytet, kategoria, autor, przypisany)
 TICKETS = [
@@ -71,6 +76,8 @@ def _seed(path):
             (uid, username, _HASHE[password], name, role, f"{username}@firma.pl", client_id),
         )
     klient_autora = {uid: client_id for uid, *_, client_id in USERS}
+    conn.executemany("INSERT INTO technician_clients (technician_id, client_id) VALUES (?,?)",
+                     TECHNICY_KLIENTOW)
 
     for tid, title, status, priority, category, created_by, assigned_to in TICKETS:
         conn.execute(
@@ -188,8 +195,20 @@ def pracownik2(client):
 
 @pytest.fixture
 def technik(client):
-    """Token technika o id=3 (Marek Lewandowski)."""
+    """Token technika o id=3 (Marek Lewandowski) — obsluguje firmy 1 i 3."""
     return _naglowek_dla(3)
+
+
+@pytest.fixture
+def technik2(client):
+    """Token drugiego technika o id=5 (Joanna Zielinska) — obsluguje firme 2."""
+    return _naglowek_dla(5)
+
+
+@pytest.fixture
+def kierownik(client):
+    """Token kierownika o id=4 (Tomasz Adamski)."""
+    return _naglowek_dla(4)
 
 
 @pytest.fixture

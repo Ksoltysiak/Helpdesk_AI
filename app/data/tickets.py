@@ -153,11 +153,64 @@ def zmien_kategorie(ticket_id, kategoria):
     )
 
 
-def zmien_przypisanie(ticket_id, uzytkownik_id):
-    get_db().execute(
-        "UPDATE tickets SET assigned_to = ?, updated_at = datetime('now') WHERE id = ?",
-        (uzytkownik_id, ticket_id),
-    )
+def zmien_przypisanie(ticket_id, uzytkownik_id, tylko_wolne_dla=None):
+    """Zmiana opiekuna zgłoszenia; None zwalnia przypisanie.
+
+    `tylko_wolne_dla` — technik, który bierze zgłoszenie sam: zapis udaje się
+    tylko wtedy, gdy zgłoszenie jest wolne albo już jest jego. Warunek leży
+    w tym samym UPDATE, więc dwóch techników klikających „Przypisz do mnie"
+    jednocześnie nie nadpisze się nawzajem. Zwraca False, gdy ktoś był szybszy.
+    """
+    sql = "UPDATE tickets SET assigned_to = ?, updated_at = datetime('now') WHERE id = ?"
+    params = [uzytkownik_id, ticket_id]
+    if tylko_wolne_dla is not None:
+        sql += " AND (assigned_to IS NULL OR assigned_to = ?)"
+        params.append(tylko_wolne_dla)
+    return get_db().execute(sql, params).rowcount == 1
+
+
+# --- Kolejka kierownika ------------------------------------------------
+
+# Statusy otwarte wymienione wprost, a nie jako „NOT IN (zamknięte)" — tylko
+# wtedy SQLite może sięgnąć po indeks statusu zamiast przeglądać wszystkie
+# zgłoszenia. Zgodność z maszyną stanów sprawdza test.
+STATUSY_OTWARTE = ("Nowe", "W trakcie", "Wstrzymane")
+_OTWARTE = "t.status IN ('Nowe', 'W trakcie', 'Wstrzymane')"
+# Najpilniejsze najpierw; zgłoszenia bez terminu na końcu.
+_WG_TERMINU = " ORDER BY t.sla_deadline IS NULL, julianday(t.sla_deadline), t.id"
+
+
+def nieprzypisane(limit):
+    """Otwarte zgłoszenia bez opiekuna — (liczba wszystkich, najpilniejsze)."""
+    db = get_db()
+    liczba = db.execute(
+        f"SELECT COUNT(*) FROM tickets t WHERE {_OTWARTE} AND t.assigned_to IS NULL"
+    ).fetchone()[0]
+    wiersze = db.execute(
+        SELECT_ZGLOSZENIA + f" WHERE {_OTWARTE} AND t.assigned_to IS NULL"
+        + _WG_TERMINU + " LIMIT ?", (limit,)
+    ).fetchall()
+    return liczba, wiersze
+
+
+def zagrozone(granica, limit):
+    """Otwarte zgłoszenia z terminem SLA przed `granica` (także już minionym)."""
+    db = get_db()
+    warunek = (f" WHERE {_OTWARTE} AND t.sla_deadline IS NOT NULL"
+               " AND julianday(t.sla_deadline) < julianday(?)")
+    liczba = db.execute("SELECT COUNT(*) FROM tickets t" + warunek, (granica,)).fetchone()[0]
+    wiersze = db.execute(
+        SELECT_ZGLOSZENIA + warunek + _WG_TERMINU + " LIMIT ?", (granica, limit)
+    ).fetchall()
+    return liczba, wiersze
+
+
+def otwarte_przypisane(uzytkownik_id, limit):
+    """Otwarte zgłoszenia technika, od najpilniejszego."""
+    return get_db().execute(
+        SELECT_ZGLOSZENIA + f" WHERE {_OTWARTE} AND t.assigned_to = ?"
+        + _WG_TERMINU + " LIMIT ?", (uzytkownik_id, limit)
+    ).fetchall()
 
 
 # --- Notatki -----------------------------------------------------------

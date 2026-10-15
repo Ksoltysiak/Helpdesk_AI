@@ -18,17 +18,33 @@ import os
 from flask import Flask, send_from_directory, jsonify, request, redirect
 from flask_swagger_ui import get_swaggerui_blueprint
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.routing import IntegerConverter
 from werkzeug.security import safe_join
 
 from app import config
-from app.api import auth, clients, errors, meta, reports, tickets
+from app.api import auth, clients, errors, meta, reports, settings, team, tickets
+from app.api.validation import MAX_ID
 from app.data.database import close_db
 from app.extensions import limiter
+
+
+class Identyfikator(IntegerConverter):
+    """`<int:...>` w ścieżkach przyjmuje tylko liczby, które zmieszczą się w bazie.
+
+    Większa liczba nie pasuje do trasy, więc klient dostaje zwykłe 404 —
+    zamiast błędu 500 przy próbie przekazania jej do SQLite.
+    """
+
+    def __init__(self, url_map, *args, **kwargs):
+        kwargs.setdefault("max", MAX_ID)
+        super().__init__(url_map, *args, **kwargs)
 
 
 def create_app():
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_ROZMIAR_ZADANIA
+    # Przed rejestracją tras — reguły kompilują się w chwili dodania.
+    app.url_map.converters["int"] = Identyfikator
 
     # Za odwrotnym proxy prawdziwy adres klienta jest w X-Forwarded-For.
     # Bez tego wszystkie żądania wyglądają jakby szły z jednego IP i dzieliłyby
@@ -46,7 +62,7 @@ def create_app():
     app.teardown_appcontext(close_db)
     limiter.init_app(app)
 
-    for modul in (auth.bp, tickets.bp, clients.bp, reports.bp, meta.bp):
+    for modul in (auth.bp, tickets.bp, clients.bp, reports.bp, team.bp, settings.bp, meta.bp):
         app.register_blueprint(modul, url_prefix="/api")
 
     errors.zarejestruj(app)

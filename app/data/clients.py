@@ -3,11 +3,14 @@
 from app.data.database import get_db
 
 
-def lista():
+def lista(obslugiwane=None):
     """Klienci z liczbą pracowników oraz wszystkich i otwartych zgłoszeń.
 
     Jedno zapytanie zamiast trzech na każdego klienta — lista nie zwalnia
     wraz z liczbą firm. LEFT JOIN zachowuje klientów bez żadnych zgłoszeń.
+
+    `obslugiwane` to zbiór firm obsługiwanych przez pytającego technika;
+    None oznacza kierownika, który obsługuje wszystkie.
     """
     rows = get_db().execute("""
         SELECT c.id, c.name,
@@ -21,7 +24,8 @@ def lista():
     """).fetchall()
     return [
         {"id": r["id"], "name": r["name"], "pracownikow": r["pracownikow"],
-         "zgloszen": r["zgloszen"], "otwartych": r["otwartych"]}
+         "zgloszen": r["zgloszen"], "otwartych": r["otwartych"],
+         "obslugiwany": obslugiwane is None or r["id"] in obslugiwane}
         for r in rows
     ]
 

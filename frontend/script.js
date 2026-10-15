@@ -8,7 +8,7 @@ let state = {
   token:  null,
   user:   null,
   role:   null,
-  clientName: null,     // firma pracownika; null dla technika i administratora
+  clientName: null,     // firma pracownika; null dla technika i kierownika
   currentView: 'dashboard',
   filterStatus: '',
   filterPriority: '',
@@ -16,6 +16,10 @@ let state = {
   klienci: null,        // lista klientów do filtra — pobierana raz na sesję
   raport: { klient: '', zakres: '30', od: '', do: '' },   // ostatnie ustawienia raportu
   ostatniRaport: null,
+  zespol: { zakres: '30', od: '', do: '' },        // okres raportu zespołu (kierownik)
+  statystyki: { zakres: '30', od: '', do: '' },    // okres raportu technika
+  wybranyTechnik: null,                            // technik oglądany przez kierownika
+  personel: null,                                  // technicy do listy przypisania
   page: 1,
 };
 
@@ -42,9 +46,21 @@ async function apiFetch(url, options = {}) {
   return data;
 }
 
+// Personel helpdesku to technicy i kierownik; kierownik dodatkowo przydziela
+// pracę, widzi statystyki zespołu i zmienia czasy SLA. Serwer egzekwuje te
+// uprawnienia niezależnie — interfejs tylko nie pokazuje niedostępnych opcji.
+function jestPersonelem() { return state.role === 'technik' || state.role === 'kierownik'; }
+function jestKierownikiem() { return state.role === 'kierownik'; }
+
+function showInfo(msg) {
+  showError(msg);
+  document.getElementById('globalError').style.background = 'var(--color-success)';
+}
+
 function showError(msg) {
   const el = document.getElementById('globalError');
   if (!el) return;
+  el.style.background = 'var(--color-error)';
   el.textContent = msg;
   el.style.display = 'block';
   clearTimeout(showError._t);
@@ -102,6 +118,9 @@ function doLogout() {
   state.userId = null; state.token = null; state.user = null; state.role = null;
   state.clientName = null; state.klienci = null; state.ostatniRaport = null;
   state.raport = { klient: '', zakres: '30', od: '', do: '' };
+  state.zespol = { zakres: '30', od: '', do: '' };
+  state.statystyki = { zakres: '30', od: '', do: '' };
+  state.wybranyTechnik = null; state.personel = null;
   state.filterStatus = ''; state.filterPriority = ''; state.filterClient = ''; state.page = 1;
   sessionStorage.removeItem('helpdesk_token');
   document.getElementById('loginScreen').style.display = 'flex';
@@ -120,9 +139,9 @@ function setupSidebar() {
   document.getElementById('userAvatarSidebar').textContent = initials;
   document.getElementById('userNameSidebar').textContent = state.user;
 
-  const isTechnik = state.role === 'technik' || state.role === 'admin';
+  const isTechnik = jestPersonelem();
   document.getElementById('userRoleSidebar').textContent =
-    state.role === 'admin' ? 'Administrator' : isTechnik ? 'Technik IT'
+    jestKierownikiem() ? 'Kierownik IT' : isTechnik ? 'Technik IT'
     : state.clientName ? `Pracownik · ${state.clientName}` : 'Pracownik';
   document.getElementById('sidebarRoleLabel').textContent =
     isTechnik ? 'Konsola IT' : 'Portal Pracownika';
@@ -160,6 +179,24 @@ function setupSidebar() {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         Raporty
       </a>`;
+    if (jestKierownikiem()) {
+      items += `
+      <div class="nav-section-label" style="margin-top:0.5rem">Zarządzanie</div>
+      <a class="nav-item" data-view="team" onclick="navigate('team')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Zespół
+      </a>
+      <a class="nav-item" data-view="settings" onclick="navigate('settings')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Ustawienia SLA
+      </a>`;
+    } else {
+      items += `
+      <a class="nav-item" data-view="my-stats" onclick="navigate('my-stats')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Moje statystyki
+      </a>`;
+    }
   }
 
   nav.innerHTML = items;
@@ -172,8 +209,10 @@ function navigate(view) {
   // Zmiana widoku zawsze zaczyna od pierwszej strony.
   if (state.currentView !== view) state.page = 1;
   state.currentView = view;
+  // Raport technika otwierany z widoku zespołu podświetla „Zespół".
+  const wMenu = view === 'technician' ? 'team' : view;
   document.querySelectorAll('.nav-item').forEach(el =>
-    el.classList.toggle('active', el.dataset.view === view)
+    el.classList.toggle('active', el.dataset.view === wMenu)
   );
   const titles = {
     'dashboard':   'Dashboard',
@@ -182,6 +221,10 @@ function navigate(view) {
     'all-tickets': 'Wszystkie zgłoszenia',
     'clients':     'Klienci',
     'reports':     'Raporty',
+    'team':        'Zespół',
+    'technician':  'Statystyki technika',
+    'my-stats':    'Moje statystyki',
+    'settings':    'Ustawienia SLA',
   };
   document.getElementById('pageTitle').textContent = titles[view] || 'HelpDesk IT';
   renderView(view);
@@ -197,6 +240,10 @@ function renderView(view) {
     case 'all-tickets': renderAllTickets(); break;
     case 'clients':     renderClients(); break;
     case 'reports':     renderReports(); break;
+    case 'team':        renderTeam(); break;
+    case 'technician':  renderTechnician(state.wybranyTechnik); break;
+    case 'my-stats':    renderTechnician(state.userId); break;
+    case 'settings':    renderSettings(); break;
     default:            renderDashboard();
   }
 }
@@ -246,12 +293,13 @@ function spinner() {
 // ============================================================
 async function renderDashboard() {
   const c = document.getElementById('mainContent');
-  const isTechnik = state.role === 'technik' || state.role === 'admin';
+  const isTechnik = jestPersonelem();
   try {
     if (isTechnik) {
-      const [dash, ticketData] = await Promise.all([
+      const [dash, ticketData, kolejka] = await Promise.all([
         apiFetch('/dashboard'),
         apiFetch('/tickets?per_page=6'),   // pulpit pokazuje tylko ostatnie
+        jestKierownikiem() ? apiFetch('/queue') : null,
       ]);
       const s = dash.statystyki;
       const recent = ticketData.tickets;
@@ -282,6 +330,7 @@ async function renderDashboard() {
             <div class="kpi-sub"><span class="kpi-dot" style="background:var(--color-success)"></span>do zamknięcia</div>
           </div>
         </div>
+        ${kolejka ? renderKolejka(kolejka) : ''}
         <div class="card">
           <div class="section-header">
             <div class="section-title">Ostatnie zgłoszenia</div>
@@ -372,7 +421,7 @@ async function renderMyTickets() {
 }
 
 // ============================================================
-// ALL TICKETS (technik/admin)
+// ALL TICKETS (technik/kierownik)
 // ============================================================
 async function renderAllTickets() {
   const c = document.getElementById('mainContent');
@@ -419,7 +468,7 @@ async function renderAllTickets() {
 }
 
 // ============================================================
-// CLIENTS (technik/admin)
+// CLIENTS (technik/kierownik)
 // ============================================================
 // Lista klientów zmienia się rzadko, a filtr potrzebuje jej przy każdym
 // przełączeniu strony listy — pobieramy ją raz i trzymamy w stanie.
@@ -442,7 +491,7 @@ async function renderClients() {
           ? `<span class="badge badge-wrealizacji">${k.otwartych}</span>`
           : '<span class="td-muted">0</span>'}</td>
         <td style="text-align:right">
-          <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();pokazRaportKlienta(${k.id})">Raport</button>
+          ${k.obslugiwany ? `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();pokazRaportKlienta(${k.id})">Raport</button>` : ''}
         </td>
       </tr>`).join('');
 
@@ -477,7 +526,7 @@ function pokazZgloszeniaKlienta(id) {
 }
 
 // ============================================================
-// REPORTS (technik/admin)
+// REPORTS (technik/kierownik)
 // ============================================================
 // Doby raportu to doby UTC (tak liczy backend), więc „dziś" też w UTC.
 function dataUTC(dniWstecz = 0) {
@@ -515,36 +564,103 @@ const ZAKRESY_RAPORTU = [
   ['365', 'Ostatnie 12 miesięcy'], ['wlasny', 'Własny zakres'],
 ];
 
+// Wybór okresu — ten sam w raportach klientów, zespołu i technika.
+// `prefiks` rozróżnia pola na stronie, `ust` to zapamiętane ustawienia widoku.
+function kontrolkiOkresu(prefiks, ust) {
+  const ukryj = ust.zakres === 'wlasny' ? '' : 'hidden';
+  return `
+    <div class="form-field">
+      <label class="form-label" for="${prefiks}Zakres">Okres</label>
+      <select class="form-input" id="${prefiks}Zakres" onchange="przelaczZakres('${prefiks}')">
+        ${ZAKRESY_RAPORTU.map(([v, l]) => `<option value="${v}" ${v === ust.zakres ? 'selected' : ''}>${l}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-field ${prefiks}-daty" ${ukryj}>
+      <label class="form-label" for="${prefiks}Od">Od</label>
+      <input class="form-input" type="date" id="${prefiks}Od" value="${escHtml(ust.od)}" max="${dataUTC()}">
+    </div>
+    <div class="form-field ${prefiks}-daty" ${ukryj}>
+      <label class="form-label" for="${prefiks}Do">Do</label>
+      <input class="form-input" type="date" id="${prefiks}Do" value="${escHtml(ust.do)}">
+    </div>`;
+}
+
+function przelaczZakres(prefiks) {
+  const wlasny = document.getElementById(`${prefiks}Zakres`).value === 'wlasny';
+  document.querySelectorAll(`.${prefiks}-daty`).forEach(el => { el.hidden = !wlasny; });
+  if (wlasny && !document.getElementById(`${prefiks}Od`).value) {
+    document.getElementById(`${prefiks}Od`).value = dataUTC(29);
+    document.getElementById(`${prefiks}Do`).value = dataUTC();
+  }
+}
+
+// Odczytuje okres z pól, zapamiętuje go w `ust` i dopisuje do zapytania.
+function parametryOkresu(prefiks, ust, params) {
+  ust.zakres = document.getElementById(`${prefiks}Zakres`).value;
+  if (ust.zakres === 'wlasny') {
+    ust.od = document.getElementById(`${prefiks}Od`).value;
+    ust.do = document.getElementById(`${prefiks}Do`).value;
+    if (ust.od) params.set('od', ust.od);
+    if (ust.do) params.set('do', ust.do);
+  } else {
+    params.set('od', dataUTC(Number(ust.zakres) - 1));   // „od … do dziś"
+  }
+  return params;
+}
+
+// Pobiera i wyświetla wynik w kontenerze. Szybkie kolejne kliknięcia:
+// odpowiedź starszego zapytania, która przyszła później, nie może nadpisać
+// nowszej; użytkownik mógł też w międzyczasie przejść do innego widoku.
+async function wygenerujWidok(klucz, url, kontener, przycisk, renderuj) {
+  const numer = wygenerujWidok[klucz] = (wygenerujWidok[klucz] || 0) + 1;
+  document.getElementById(przycisk).disabled = true;
+  document.getElementById(kontener).innerHTML = spinner();
+  state.ostatniRaport = null;
+
+  let html, dane = null;
+  try {
+    dane = await apiFetch(url);
+    if (numer !== wygenerujWidok[klucz]) return null;
+    html = renderuj(dane);
+  } catch (e) {
+    if (numer !== wygenerujWidok[klucz]) return null;
+    html = `<div style="margin-top:1rem">${errorCard(e.message)}</div>`;
+    dane = null;
+  }
+  const wynik = document.getElementById(kontener);
+  if (!wynik) return null;
+  wynik.innerHTML = html;
+  state.ostatniRaport = dane;
+  document.getElementById(przycisk).disabled = !dane;
+  return dane;
+}
+
 async function renderReports() {
   const c = document.getElementById('mainContent');
   try {
     const klienci = await pobierzKlientow();
     const r = state.raport;
-    const ukryj = r.zakres === 'wlasny' ? '' : 'hidden';
+    // Technik tworzy raporty tylko dla obsługiwanych firm (serwer to egzekwuje);
+    // kierownik — dla każdej firmy i zbiorczo.
+    const dostepni = jestKierownikiem() ? klienci : klienci.filter(k => k.obslugiwany);
+    if (!dostepni.length) {
+      c.innerHTML = `<div class="card">${emptyState('Nie obsługujesz jeszcze żadnej firmy — raport może utworzyć kierownik.')}</div>`;
+      return;
+    }
+    if (!jestKierownikiem() && !dostepni.some(k => String(k.id) === r.klient)) {
+      r.klient = String(dostepni[0].id);
+    }
     c.innerHTML = `
       <div class="card no-print">
         <div class="report-controls">
           <div class="form-field">
             <label class="form-label" for="raportKlient">Klient</label>
             <select class="form-input" id="raportKlient">
-              <option value="">Wszyscy klienci</option>
-              ${klienci.map(k => `<option value="${k.id}" ${String(k.id) === r.klient ? 'selected' : ''}>${escHtml(k.name)}</option>`).join('')}
+              ${jestKierownikiem() ? '<option value="">Wszyscy klienci</option>' : ''}
+              ${dostepni.map(k => `<option value="${k.id}" ${String(k.id) === r.klient ? 'selected' : ''}>${escHtml(k.name)}</option>`).join('')}
             </select>
           </div>
-          <div class="form-field">
-            <label class="form-label" for="raportZakres">Okres</label>
-            <select class="form-input" id="raportZakres" onchange="przelaczZakresRaportu()">
-              ${ZAKRESY_RAPORTU.map(([v, l]) => `<option value="${v}" ${v === r.zakres ? 'selected' : ''}>${l}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-field raport-daty" ${ukryj}>
-            <label class="form-label" for="raportOd">Od</label>
-            <input class="form-input" type="date" id="raportOd" value="${escHtml(r.od)}" max="${dataUTC()}">
-          </div>
-          <div class="form-field raport-daty" ${ukryj}>
-            <label class="form-label" for="raportDo">Do</label>
-            <input class="form-input" type="date" id="raportDo" value="${escHtml(r.do)}">
-          </div>
+          ${kontrolkiOkresu('raport', r)}
           <div class="report-actions">
             <button class="btn btn-primary" onclick="wygenerujRaport()">Generuj raport</button>
             <button class="btn btn-secondary" id="raportDrukuj" onclick="drukujRaport()" disabled>Drukuj / PDF</button>
@@ -558,53 +674,12 @@ async function renderReports() {
   }
 }
 
-function przelaczZakresRaportu() {
-  const wlasny = document.getElementById('raportZakres').value === 'wlasny';
-  document.querySelectorAll('.raport-daty').forEach(el => { el.hidden = !wlasny; });
-  if (wlasny && !document.getElementById('raportOd').value) {
-    document.getElementById('raportOd').value = dataUTC(29);
-    document.getElementById('raportDo').value = dataUTC();
-  }
-}
-
 async function wygenerujRaport() {
   const r = state.raport;
   r.klient = document.getElementById('raportKlient').value;
-  r.zakres = document.getElementById('raportZakres').value;
-
-  const params = new URLSearchParams();
+  const params = parametryOkresu('raport', r, new URLSearchParams());
   if (r.klient) params.set('client_id', r.klient);
-  if (r.zakres === 'wlasny') {
-    r.od = document.getElementById('raportOd').value;
-    r.do = document.getElementById('raportDo').value;
-    if (r.od) params.set('od', r.od);
-    if (r.do) params.set('do', r.do);
-  } else {
-    params.set('od', dataUTC(Number(r.zakres) - 1));   // „od … do dziś"
-  }
-
-  // Szybkie kolejne kliknięcia: wynik starszego zapytania, który przyszedł
-  // później, nie może nadpisać nowszego raportu.
-  const numer = wygenerujRaport.numer = (wygenerujRaport.numer || 0) + 1;
-  document.getElementById('raportDrukuj').disabled = true;
-  document.getElementById('raportWynik').innerHTML = spinner();
-  state.ostatniRaport = null;
-
-  let html;
-  try {
-    const dane = await apiFetch(`/reports?${params}`);
-    if (numer !== wygenerujRaport.numer) return;
-    state.ostatniRaport = dane;
-    html = renderRaport(dane);
-  } catch (e) {
-    if (numer !== wygenerujRaport.numer) return;
-    html = `<div style="margin-top:1rem">${errorCard(e.message)}</div>`;
-  }
-  // Użytkownik mógł w międzyczasie przejść do innego widoku.
-  const wynik = document.getElementById('raportWynik');
-  if (!wynik) return;
-  wynik.innerHTML = html;
-  document.getElementById('raportDrukuj').disabled = !state.ostatniRaport;
+  await wygenerujWidok('raport', `/reports?${params}`, 'raportWynik', 'raportDrukuj', renderRaport);
 }
 
 function kpiRaportu(etykieta, wartosc, podpis, kolor = '', dodatek = '') {
@@ -776,12 +851,16 @@ function renderRaport(d) {
 }
 
 // Nazwa pliku PDF w oknie drukowania pochodzi z tytułu strony.
+function drukuj(tytul) {
+  drukuj.poprzedni = document.title;
+  document.title = tytul;
+  window.print();
+}
+
 function drukujRaport() {
   const d = state.ostatniRaport;
   if (!d) return;
-  drukujRaport.tytul = document.title;
-  document.title = `Raport ${d.klient ? d.klient.name : 'wszyscy klienci'} ${d.okres.od} - ${d.okres.do}`;
-  window.print();
+  drukuj(`Raport ${d.klient ? d.klient.name : 'wszyscy klienci'} ${d.okres.od} - ${d.okres.do}`);
 }
 
 // Wydruk zawsze w jasnym motywie (także z Ctrl+P) — ciemne tło na papierze
@@ -794,8 +873,317 @@ window.addEventListener('beforeprint', () => {
 });
 window.addEventListener('afterprint', () => {
   if (motywPrzedWydrukiem) document.documentElement.setAttribute('data-theme', motywPrzedWydrukiem);
-  if (drukujRaport.tytul) { document.title = drukujRaport.tytul; drukujRaport.tytul = null; }
+  if (drukuj.poprzedni) { document.title = drukuj.poprzedni; drukuj.poprzedni = null; }
 });
+
+// ============================================================
+// TEAM (kierownik) — kolejka, statystyki zespołu i techników
+// ============================================================
+// Technicy do listy przypisania w szczegółach zgłoszenia — z tej samej
+// odpowiedzi co statystyki zespołu, pobierane raz na sesję.
+async function pobierzPersonel() {
+  if (!state.personel) {
+    const dane = await apiFetch('/team');
+    state.personel = dane.technicy.map(t => ({ id: t.id, name: t.name, role: t.role }));
+  }
+  return state.personel;
+}
+
+// Ile zostało do terminu SLA albo jak dawno minął — to decyduje o kolejności
+// działań kierownika, więc jest ważniejsze niż sama data.
+function czasDoTerminu(iso) {
+  if (!iso) return '<span class="td-muted">bez terminu</span>';
+  const godzin = (new Date(iso) - Date.now()) / 3600000;
+  return godzin < 0
+    ? `<span style="color:var(--color-error);font-weight:500">po terminie ${formatCzas(-godzin)}</span>`
+    : `za ${formatCzas(godzin)}`;
+}
+
+function listaKolejki(zgloszenia, pokazOpiekuna) {
+  if (!zgloszenia.length) return emptyState('Brak — wszystko pod kontrolą.');
+  const wiersze = zgloszenia.slice(0, 5).map(t => `
+    <tr onclick="openTicket(${t.id})" style="cursor:pointer">
+      <td>
+        <div style="font-weight:500">${escHtml(t.title)}</div>
+        <div class="td-muted" style="font-size:var(--text-xs)">#${t.id} · ${escHtml(t.client_name || '—')}</div>
+      </td>
+      <td>${priorityBadge(t.priority)}</td>
+      <td style="font-size:var(--text-sm);white-space:nowrap">
+        ${czasDoTerminu(t.sla_deadline)}
+        ${pokazOpiekuna ? `<div class="td-muted" style="font-size:var(--text-xs)">${escHtml(t.assigned_to_name || 'bez opiekuna')}</div>` : ''}
+      </td>
+    </tr>`).join('');
+  return `<div class="table-wrap"><table><tbody>${wiersze}</tbody></table></div>`;
+}
+
+function renderKolejka(k) {
+  const karta = (tytul, opis, czesc, klasa, pokazOpiekuna) => `
+    <div class="card">
+      <div class="section-header">
+        <div class="section-title">${tytul} <span class="badge ${klasa}">${czesc.liczba}</span></div>
+      </div>
+      <p style="font-size:var(--text-xs);color:var(--color-text-muted);margin:-0.5rem 0 0.5rem">${opis}</p>
+      ${listaKolejki(czesc.zgloszenia, pokazOpiekuna)}
+    </div>`;
+  return `
+    <div class="report-grid">
+      ${karta('Bez opiekuna', 'Otwarte zgłoszenia, których nikt nie prowadzi — kliknij, aby przydzielić.',
+              k.nieprzypisane, 'badge-nowe', false)}
+      ${karta('Zagrożone SLA', `Termin mija w ciągu ${k.prog_godzin} h albo już minął.`,
+              k.zagrozone, 'badge-krityczny', true)}
+    </div>`;
+}
+
+async function renderTeam() {
+  const c = document.getElementById('mainContent');
+  c.innerHTML = `
+    <div class="card no-print">
+      <div class="report-controls">
+        ${kontrolkiOkresu('zespol', state.zespol)}
+        <div class="report-actions">
+          <button class="btn btn-primary" onclick="wygenerujZespol()">Generuj raport</button>
+          <button class="btn btn-secondary" id="zespolDrukuj" onclick="drukujZespol()" disabled>Drukuj / PDF</button>
+        </div>
+      </div>
+    </div>
+    <div id="zespolWynik"></div>`;
+  wygenerujZespol();
+}
+
+async function wygenerujZespol() {
+  const params = parametryOkresu('zespol', state.zespol, new URLSearchParams());
+  const dane = await wygenerujWidok('zespol', `/team?${params}`, 'zespolWynik', 'zespolDrukuj', renderZespol);
+  if (dane) state.personel = dane.technicy.map(t => ({ id: t.id, name: t.name, role: t.role }));
+}
+
+function drukujZespol() {
+  const d = state.ostatniRaport;
+  if (d) drukuj(`Raport zespolu ${d.okres.od} - ${d.okres.do}`);
+}
+
+function pokazTechnika(id) {
+  state.wybranyTechnik = id;
+  navigate('technician');
+}
+
+function etykietaRoli(rola) {
+  return rola === 'kierownik' ? '<span class="badge badge-ai">kierownik</span>' : '';
+}
+
+// Wspólne kafelki statystyk — zespół i pojedynczy technik.
+function kafelkiStatystyk(s) {
+  const kolorSla = s.procent_w_terminie_sla === null ? ''
+    : s.procent_w_terminie_sla >= 80 ? 'var(--color-success)' : 'var(--color-error)';
+  return `
+    <div class="report-grid report-kpis">
+      ${kpiRaportu('Rozwiązane', s.rozwiazanych, `poprzednio: ${s.rozwiazanych_poprzednio}`, '',
+                   zmianaPracy(s.zmiana_proc, s.rozwiazanych, s.rozwiazanych_poprzednio))}
+      ${kpiRaportu('Średni czas reakcji', formatCzas(s.sredni_czas_reakcji_h), `${s.podjetych} podjętych zgłoszeń`)}
+      ${kpiRaportu('Średni czas rozwiązania', formatCzas(s.sredni_czas_rozwiazania_h), 'od zgłoszenia do rozwiązania')}
+      ${kpiRaportu('W terminie SLA', formatProcent(s.procent_w_terminie_sla),
+                   `${s.w_terminie_sla} z ${s.rozwiazanych_z_terminem} rozwiązanych`, kolorSla)}
+      ${kpiRaportu('Otwarte teraz', s.otwartych, `${s.otwartych_po_terminie} po terminie`,
+                   s.otwartych_po_terminie ? 'var(--color-error)' : '')}
+    </div>`;
+}
+
+// Więcej ROZWIĄZANYCH zgłoszeń to dobrze — kolory odwrotnie niż w raporcie
+// klienta, gdzie więcej zgłoszeń oznacza więcej awarii.
+function zmianaPracy(zmiana, teraz, poprzednio) {
+  return zmianaHtml(zmiana, teraz, poprzednio)
+    .replace('delta-up', 'delta-tmp').replace('delta-down', 'delta-up').replace('delta-tmp', 'delta-down');
+}
+
+function renderZespol(d) {
+  const z = d.zespol;
+  const max = Math.max(1, ...d.technicy.map(t => Math.max(t.rozwiazanych, t.rozwiazanych_poprzednio)));
+  const wiersze = d.technicy.map(t => `
+    <tr onclick="pokazTechnika(${t.id})" style="cursor:pointer" title="Raport technika">
+      <td style="font-weight:500">${escHtml(t.name)} ${etykietaRoli(t.role)}</td>
+      <td>${t.otwartych}${t.otwartych_po_terminie ? ` <span class="badge badge-krityczny">${t.otwartych_po_terminie} po terminie</span>` : ''}</td>
+      <td>${t.podjetych}</td>
+      <td class="td-muted">${formatCzas(t.sredni_czas_reakcji_h)}</td>
+      <td>${t.rozwiazanych} ${zmianaPracy(t.zmiana_proc, t.rozwiazanych, t.rozwiazanych_poprzednio)}</td>
+      <td class="td-muted">${formatCzas(t.sredni_czas_rozwiazania_h)}</td>
+      <td>${formatProcent(t.procent_w_terminie_sla)}</td>
+      <td class="td-muted">${t.notatek}</td>
+    </tr>`).join('');
+  const slupki = d.technicy.map(t => `
+    <div class="bar-row" title="${escHtml(t.name)}: ${t.rozwiazanych} (poprzedni okres: ${t.rozwiazanych_poprzednio})">
+      <div class="bar-label">${escHtml(t.name)}</div>
+      <div class="bar-track">
+        ${t.rozwiazanych ? `<div class="bar-fill" style="width:${t.rozwiazanych / max * 100}%"></div>` : ''}
+        ${t.rozwiazanych_poprzednio ? `<div class="bar-prev" style="left:${t.rozwiazanych_poprzednio / max * 100}%"></div>` : ''}
+      </div>
+      <div class="bar-value">${t.rozwiazanych}</div>
+    </div>`).join('');
+
+  return `
+    <div class="report-header">
+      <div>
+        <div class="report-title">Raport zespołu</div>
+        <div class="report-meta">
+          Okres: ${formatDzien(d.okres.od)} – ${formatDzien(d.okres.do)} (${d.okres.dni} dni) ·
+          porównanie z okresem ${formatDzien(d.poprzedni_okres.od)} – ${formatDzien(d.poprzedni_okres.do)}
+        </div>
+      </div>
+      <div class="report-meta">Wygenerowano: ${new Date().toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' })}</div>
+    </div>
+    ${kafelkiStatystyk(z)}
+    <div class="card" style="margin-bottom:1rem">
+      <div class="section-header"><div class="section-title">Technicy</div></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Technik</th><th>Otwarte teraz</th><th>Podjęte</th><th>Śr. reakcja</th>
+            <th>Rozwiązane</th><th>Śr. rozwiązanie</th><th>W terminie SLA</th><th>Notatki</th></tr></thead>
+          <tbody>${wiersze}</tbody>
+        </table>
+      </div>
+      <p style="font-size:var(--text-xs);color:var(--color-text-muted);margin-top:0.75rem">
+        Kolejność alfabetyczna — statystyki opisują obciążenie i tempo pracy, a nie ranking.
+        Kliknij technika, aby zobaczyć jego raport.
+      </p>
+    </div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="section-header"><div class="section-title">Rozwiązane zgłoszenia</div></div>
+      ${slupki}
+      <div class="chart-legend">
+        <span><span class="legend-swatch"></span>wybrany okres</span>
+        <span><span class="legend-line"></span>poprzedni okres</span>
+      </div>
+    </div>`;
+}
+
+async function renderTechnician(id) {
+  const c = document.getElementById('mainContent');
+  if (!id) { navigate(jestKierownikiem() ? 'team' : 'dashboard'); return; }
+  const powrot = jestKierownikiem()
+    ? `<button class="btn btn-secondary" onclick="navigate('team')">← Zespół</button>` : '';
+  c.innerHTML = `
+    <div class="card no-print">
+      <div class="report-controls">
+        ${kontrolkiOkresu('technik', state.statystyki)}
+        <div class="report-actions">
+          ${powrot}
+          <button class="btn btn-primary" onclick="wygenerujTechnika(${Number(id)})">Generuj raport</button>
+          <button class="btn btn-secondary" id="technikDrukuj" onclick="drukujTechnika()" disabled>Drukuj / PDF</button>
+        </div>
+      </div>
+    </div>
+    <div id="technikWynik"></div>`;
+  wygenerujTechnika(id);
+}
+
+async function wygenerujTechnika(id) {
+  const params = parametryOkresu('technik', state.statystyki, new URLSearchParams());
+  await wygenerujWidok('technik', `/team/${Number(id)}?${params}`, 'technikWynik', 'technikDrukuj',
+                       renderRaportTechnika);
+}
+
+function drukujTechnika() {
+  const d = state.ostatniRaport;
+  if (d) drukuj(`Raport ${d.technik.name} ${d.okres.od} - ${d.okres.do}`);
+}
+
+function renderRaportTechnika(d) {
+  const s = d.statystyki;
+  const grup = { dzien: 'dziennie', tydzien: 'tygodniowo', miesiac: 'miesięcznie' }[d.okres.grupowanie];
+  const max = Math.max(1, ...d.wg_kategorii.map(k => k.liczba));
+  const kategorie = d.wg_kategorii.map(k => `
+    <div class="bar-row">
+      <div class="bar-label">${escHtml(k.etykieta)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${k.liczba / max * 100}%"></div></div>
+      <div class="bar-value">${k.liczba}</div>
+    </div>`).join('');
+  return `
+    <div class="report-header">
+      <div>
+        <div class="report-title">Statystyki — ${escHtml(d.technik.name)} ${etykietaRoli(d.technik.role)}</div>
+        <div class="report-meta">
+          Okres: ${formatDzien(d.okres.od)} – ${formatDzien(d.okres.do)} (${d.okres.dni} dni) ·
+          porównanie z okresem ${formatDzien(d.poprzedni_okres.od)} – ${formatDzien(d.poprzedni_okres.do)}
+        </div>
+      </div>
+      <div class="report-meta">Notatki w okresie: ${s.notatek}</div>
+    </div>
+    ${kafelkiStatystyk(s)}
+    <div class="report-grid">
+      <div class="card">
+        <div class="section-header"><div class="section-title">Rozwiązane zgłoszenia (${grup})</div></div>
+        ${s.rozwiazanych ? wykresTrendu(d.trend, d.okres.grupowanie) : emptyState('Brak rozwiązanych zgłoszeń w tym okresie.')}
+      </div>
+      <div class="card">
+        <div class="section-header"><div class="section-title">Kategorie rozwiązanych</div></div>
+        ${kategorie || emptyState('Brak rozwiązanych zgłoszeń w tym okresie.')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-header"><div class="section-title">Otwarte zgłoszenia (${s.otwartych})</div></div>
+      ${d.otwarte.length ? renderTicketTable(d.otwarte, true) : emptyState('Brak otwartych zgłoszeń.')}
+    </div>`;
+}
+
+// ------------------------------------------------------------ ustawienia SLA
+const PRIORYTETY = ['Krytyczny', 'Wysoki', 'Sredni', 'Niski'];
+
+async function renderSettings() {
+  const c = document.getElementById('mainContent');
+  try {
+    const d = await apiFetch('/settings/sla');
+    const pola = PRIORYTETY.map(p => `
+      <div class="bar-row" style="grid-template-columns:8rem 8rem 1fr">
+        <div>${priorityBadge(p)}</div>
+        <input class="form-input" type="number" id="sla-${p}" value="${d.godziny[p]}"
+               min="${d.zakres.min}" max="${d.zakres.max}" step="1" style="text-align:right">
+        <div class="td-muted">godzin ${d.godziny[p] !== d.domyslne[p] ? `(domyślnie ${d.domyslne[p]})` : '(domyślnie)'}</div>
+      </div>`).join('');
+    const historia = d.historia.map(h => `
+      <tr><td class="td-muted">${formatDateTime(h.kiedy)}</td><td>${escHtml(h.kto || '—')}</td>
+          <td>${escHtml(h.ustawienie)}</td><td>${escHtml(h.stara)} → <strong>${escHtml(h.nowa)}</strong> h</td></tr>`).join('');
+    c.innerHTML = `
+      <div style="max-width:760px">
+        <div class="card" style="margin-bottom:1rem">
+          <div class="section-header"><div class="section-title">Czas na rozwiązanie zgłoszenia</div></div>
+          <p style="font-size:var(--text-sm);color:var(--color-text-muted);margin-bottom:1rem">
+            Priorytet nadaje moduł AI, a od niego zależy termin SLA. Zmiana dotyczy
+            <strong>tylko nowych zgłoszeń</strong> — terminy istniejących się nie przesuwają.
+          </p>
+          ${pola}
+          <button class="btn btn-primary" id="slaZapisz" style="margin-top:0.5rem" onclick="zapiszSla()">Zapisz zmiany</button>
+        </div>
+        <div class="card">
+          <div class="section-header"><div class="section-title">Historia zmian</div></div>
+          ${historia ? `<div class="table-wrap"><table>
+            <thead><tr><th>Kiedy</th><th>Kto</th><th>Ustawienie</th><th>Zmiana</th></tr></thead>
+            <tbody>${historia}</tbody></table></div>` : emptyState('Czasy SLA nie były jeszcze zmieniane.')}
+        </div>
+      </div>`;
+    renderSettings.obecne = d.godziny;
+  } catch (e) {
+    c.innerHTML = errorCard(e.message);
+  }
+}
+
+async function zapiszSla() {
+  const zmiany = {};
+  for (const p of PRIORYTETY) {
+    const wartosc = Number(document.getElementById(`sla-${p}`).value);
+    if (wartosc !== renderSettings.obecne[p]) zmiany[p] = wartosc;
+  }
+  if (!Object.keys(zmiany).length) { showInfo('Brak zmian do zapisania.'); return; }
+  const btn = document.getElementById('slaZapisz');
+  btn.disabled = true;
+  try {
+    // Walidację (liczba całkowita, zakres) wykonuje serwer — komunikat
+    // błędu pochodzi wprost z jego odpowiedzi.
+    await apiFetch('/settings/sla', { method: 'PUT', body: JSON.stringify({ godziny: zmiany }) });
+    showInfo('Zapisano nowe czasy SLA.');
+    renderSettings();
+  } catch (e) {
+    showError(e.message);
+    btn.disabled = false;
+  }
+}
 
 // ============================================================
 // NEW TICKET FORM
@@ -870,8 +1258,11 @@ async function openTicket(id) {
   modal.classList.add('open');
 
   try {
-    const t = await apiFetch(`/tickets/${id}`);
-    const isTechnik = state.role === 'technik' || state.role === 'admin';
+    const [t, personel] = await Promise.all([
+      apiFetch(`/tickets/${id}`),
+      jestKierownikiem() ? pobierzPersonel() : null,
+    ]);
+    const isTechnik = jestPersonelem();
     const allowed   = TRANSITIONS[t.status] || [];
 
     const notesList = t.notes.length
@@ -886,15 +1277,38 @@ async function openTicket(id) {
           </div>`).join('')
       : '<p style="color:var(--color-text-muted);font-size:var(--text-sm)">Brak notatek.</p>';
 
+    // Przypisanie: kierownik przydziela i przenosi zgłoszenia; technik może
+    // wziąć wolne zgłoszenie dla siebie.
+    let przypisanie = '';
+    if (personel) {
+      przypisanie = `
+        <div class="form-field">
+          <label class="form-label" for="modalPrzypisz">Przypisz do</label>
+          <select class="form-input filter-select" id="modalPrzypisz" style="width:100%">
+            <option value="">— bez opiekuna —</option>
+            ${personel.map(o => `<option value="${o.id}" ${o.id === t.assigned_to ? 'selected' : ''}>${escHtml(o.name)}${o.role === 'kierownik' ? ' (kierownik)' : ''}</option>`).join('')}
+          </select>
+        </div>`;
+    } else if (isTechnik && t.assigned_to === null && t.status !== 'Zamkniete') {
+      przypisanie = `
+        <label class="form-field" style="display:flex;align-items:center;gap:0.5rem;font-size:var(--text-sm);cursor:pointer">
+          <input type="checkbox" id="modalPrzypiszMnie"> Przypisz to zgłoszenie do mnie
+        </label>`;
+    }
+
+    // Pierwsza opcja „bez zmiany": zapis samej notatki albo przypisania nie
+    // może przy okazji przesuwać zgłoszenia do kolejnego statusu.
     const techActions = isTechnik ? `
       <div class="divider"></div>
       ${allowed.length ? `
         <div class="form-field">
           <label class="form-label">Zmień status</label>
           <select class="form-input filter-select" id="modalStatus" style="width:100%">
+            <option value="">— bez zmiany —</option>
             ${allowed.map(s => `<option value="${s}">${statusLabel(s)}</option>`).join('')}
           </select>
         </div>` : `<p style="font-size:var(--text-sm);color:var(--color-text-muted);margin-bottom:0.75rem">Zgłoszenie zamknięte — brak dostępnych zmian statusu.</p>`}
+      ${przypisanie}
       <div class="form-field">
         <label class="form-label">Dodaj notatkę wewnętrzną</label>
         <textarea class="form-input form-textarea" id="modalNote" placeholder="Opisz wykonane działania..." style="min-height:70px"></textarea>
@@ -951,9 +1365,9 @@ async function openTicket(id) {
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal()">Zamknij</button>
-        ${isTechnik ? `<button class="btn btn-primary" id="saveModalBtn" onclick="saveTicketChanges(${t.id}, ${allowed.length > 0})">
+        ${isTechnik ? `<button class="btn btn-primary" id="saveModalBtn" onclick="saveTicketChanges(${t.id}, ${t.assigned_to === null ? 'null' : t.assigned_to})">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-          ${allowed.length ? 'Zapisz' : 'Dodaj notatkę'}
+          Zapisz
         </button>` : ''}
       </div>`;
   } catch (e) {
@@ -965,21 +1379,29 @@ function closeModal() {
   document.getElementById('ticketModal').classList.remove('open');
 }
 
-async function saveTicketChanges(id, changeStatus) {
+async function saveTicketChanges(id, obecnyOpiekun) {
   const btn      = document.getElementById('saveModalBtn');
   const noteText = (document.getElementById('modalNote')?.value || '').trim();
-  const newStatus = changeStatus ? document.getElementById('modalStatus')?.value : null;
 
-  if (!newStatus && !noteText) { closeModal(); return; }
+  // Status i przypisanie idą jednym żądaniem — serwer zapisuje je razem
+  // albo wcale, więc konflikt nie zostawi zgłoszenia w połowie zmiany.
+  const zmiany = {};
+  const newStatus = document.getElementById('modalStatus')?.value;
+  if (newStatus) zmiany.status = newStatus;
+  const wybor = document.getElementById('modalPrzypisz');
+  if (wybor) {
+    const opiekun = wybor.value === '' ? null : Number(wybor.value);
+    if (opiekun !== obecnyOpiekun) zmiany.assigned_to = opiekun;
+  }
+  if (document.getElementById('modalPrzypiszMnie')?.checked) zmiany.assigned_to = state.userId;
+
+  if (!Object.keys(zmiany).length && !noteText) { closeModal(); return; }
 
   if (btn) { btn.disabled = true; btn.textContent = 'Zapisywanie...'; }
 
   try {
-    if (newStatus) {
-      await apiFetch(`/tickets/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: newStatus }),
-      });
+    if (Object.keys(zmiany).length) {
+      await apiFetch(`/tickets/${id}`, { method: 'PATCH', body: JSON.stringify(zmiany) });
     }
     if (noteText) {
       await apiFetch(`/tickets/${id}/notes`, {
@@ -991,7 +1413,7 @@ async function saveTicketChanges(id, changeStatus) {
     renderView(state.currentView);
   } catch (e) {
     showError(e.message);
-    if (btn) { btn.disabled = false; btn.textContent = changeStatus ? 'Zapisz' : 'Dodaj notatkę'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Zapisz'; }
   }
 }
 

@@ -217,3 +217,40 @@ def test_niedozwolona_metoda_poza_api_nie_zwraca_json(client):
     resp = client.post("/")
     assert resp.status_code == 405
     assert not resp.is_json
+
+
+# ---------------------------------------------------------------
+# Liczby wieksze niz miesci kolumna INTEGER SQLite (znalezione stress testem)
+# ---------------------------------------------------------------
+
+OGROMNA = 10**20
+
+
+@pytest.mark.parametrize("metoda,sciezka,dane", [
+    ("get",   f"/api/tickets/{OGROMNA}",        None),
+    ("patch", f"/api/tickets/{OGROMNA}",        {"status": "W trakcie"}),
+    ("get",   f"/api/tickets/{OGROMNA}/audit",  None),
+    ("post",  f"/api/tickets/{OGROMNA}/notes",  {"content": "x"}),
+    ("get",   f"/api/team/{OGROMNA}",           None),
+])
+def test_ogromny_identyfikator_w_sciezce_nie_powoduje_bledu_serwera(client, kierownik, metoda,
+                                                                    sciezka, dane):
+    """Liczba spoza zakresu nie pasuje do trasy API — klient dostaje odpowiedz
+    jak dla kazdej nieznanej sciezki /api/* (404 albo 405, zalezy od metody),
+    w formacie JSON, a nie blad 500."""
+    resp = getattr(client, metoda)(sciezka, headers=kierownik, json=dane)
+    assert resp.status_code in (404, 405)
+    assert resp.is_json
+
+
+@pytest.mark.parametrize("osoba", [OGROMNA, -OGROMNA, 2**63, 0, -1])
+def test_przypisanie_poza_zakresem_identyfikatorow_daje_400(client, kierownik, osoba):
+    resp = client.patch("/api/tickets/1", headers=kierownik, json={"assigned_to": osoba})
+    assert resp.status_code == 400
+
+
+def test_najwiekszy_mozliwy_identyfikator_jest_obslugiwany(client, kierownik):
+    """2^63 - 1 miesci sie w bazie — taki identyfikator po prostu nie istnieje."""
+    assert client.get(f"/api/tickets/{2**63 - 1}", headers=kierownik).status_code == 404
+    assert client.patch("/api/tickets/1", headers=kierownik,
+                        json={"assigned_to": 2**63 - 1}).status_code == 400

@@ -1,11 +1,11 @@
 """Punkt końcowy raportów dla klientów."""
 
-from datetime import datetime, timezone
+from flask import Blueprint, jsonify, request, g
 
-from flask import Blueprint, jsonify, request
-
+from app.api.validation import okres_z_parametrow
 from app.data import clients as klienci
 from app.data import reports as repo
+from app.data import users
 from app.data.database import teraz_utc
 from app.domain import reports as reguly
 from app.security.decorators import roles_required
@@ -25,12 +25,15 @@ def _klient_z_parametru():
 
 
 @bp.route("/reports", methods=["GET"])
-@roles_required("technik", "admin")
+@roles_required("technik", "kierownik")
 def raport():
     """Raport zgłoszeń klienta (albo wszystkich klientów) za wybrany okres.
 
     Parametry: `client_id` (opcjonalny), `od` i `do` w formacie RRRR-MM-DD
     (domyślnie ostatnie 30 dni, obie daty włącznie, doby UTC).
+
+    Technik tworzy raporty wyłącznie dla firm, które obsługuje; raport
+    zbiorczy wszystkich firm i raporty dowolnej firmy — tylko kierownik.
     """
     client_id, blad = _klient_z_parametru()
     if blad:
@@ -42,11 +45,17 @@ def raport():
         if not klient:
             return jsonify({"error": "Nie znaleziono klienta"}), 404
 
-    dzis = datetime.now(timezone.utc).date()
-    try:
-        od, do = reguly.okres(request.args.get("od"), request.args.get("do"), dzis)
-    except reguly.BladOkresu as e:
-        return jsonify({"error": str(e)}), 400
+    if g.user["role"] != "kierownik":
+        if client_id is None:
+            return jsonify({"error": "Raport zbiorczy wszystkich firm moze utworzyc"
+                                     " tylko kierownik"}), 403
+        if client_id not in users.obslugiwani_klienci(g.user["id"]):
+            return jsonify({"error": "Mozesz tworzyc raporty tylko dla firm,"
+                                     " ktore obslugujesz"}), 403
+
+    od, do, blad = okres_z_parametrow()
+    if blad:
+        return blad
     pop_od, pop_do = reguly.poprzedni_okres(od, do)
 
     s = repo.podsumowanie(client_id, od, do, teraz_utc())
@@ -60,8 +69,7 @@ def raport():
         "rozwiazanych":            s["rozwiazanych"],
         "procent_rozwiazanych":    reguly.procent(s["rozwiazanych"], s["zgloszen"]),
         "krytycznych":             s["krytycznych"],
-        "sredni_czas_rozwiazania_h": (round(s["sredni_czas_h"], 1)
-                                      if s["sredni_czas_h"] is not None else None),
+        "sredni_czas_rozwiazania_h": reguly.zaokraglij(s["sredni_czas_h"]),
         "rozwiazanych_z_terminem": s["z_terminem"],
         "w_terminie_sla":          s["w_terminie"],
         "procent_w_terminie_sla":  reguly.procent(s["w_terminie"], s["z_terminem"]),

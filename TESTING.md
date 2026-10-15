@@ -35,13 +35,13 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
 
 ```
                     ┌───────────────────────┐
-                    │   E2E — demo.py       │   25 sprawdzeń
+                    │   E2E — demo.py       │   31 sprawdzeń
                     │   działający serwer   │   ~3 s
                     ├───────────────────────┤
-                │      Integracyjne         │   376 testów
-                │   Flask + baza danych     │   ~11 s
+                │      Integracyjne         │   444 testy
+                │   Flask + baza danych     │   ~13 s
             ├───────────────────────────────────┤
-        │          Jednostkowe                  │   142 testy
+        │          Jednostkowe                  │   154 testy
         │      czysta logika, bez I/O           │   ~0,4 s
     └───────────────────────────────────────────────┘
 ```
@@ -52,18 +52,19 @@ sposób uruchomienia oraz dowód, że testy faktycznie wykrywają błędy.
 | Jednostkowa | `tests/test_tokens.py` | 13 | Generowanie i weryfikacja JWT |
 | Jednostkowa | `tests/test_transitions.py` | 9 | Maszyna stanów zgłoszenia |
 | Jednostkowa | `tests/test_ai_skutecznosc.py` | 27 | Normalizacja polszczyzny, pewność, próg skuteczności |
-| Jednostkowa | `tests/test_architektura.py` | 27 | Kierunek zależności między warstwami |
-| Jednostkowa | `tests/test_raporty_reguly.py` | 47 | Okres raportu, trend, rekomendacje, odmiana liczebników |
+| Jednostkowa | `tests/test_architektura.py` | 33 | Kierunek zależności między warstwami |
+| Jednostkowa | `tests/test_raporty_reguly.py` | 53 | Okres raportu, trend, rekomendacje, odmiana liczebników, zaokrąglenia |
 | Integracyjna | `tests/test_api_auth.py` | 30 | Logowanie, ochrona endpointów |
-| Integracyjna | `tests/test_api_tickets.py` | 77 | RBAC, CRUD, notatki, audyt |
+| Integracyjna | `tests/test_api_tickets.py` | 76 | RBAC, CRUD, notatki, audyt |
+| Integracyjna | `tests/test_kierownik.py` | 56 | Przydział pracy, wyścig o zgłoszenie, statystyki zespołu, kolejka, SLA, migracja roli |
 | Integracyjna | `tests/test_api_security.py` | 32 | Nagłówki, 404 API, limit żądań |
 | Integracyjna | `tests/test_klienci.py` | 21 | Klienci, izolacja firm, migracja, dane demonstracyjne |
 | Integracyjna | `tests/test_raporty.py` | 47 | Liczby raportu, granice okresu, odporność na dane, indeksy |
-| Integracyjna | `tests/test_openapi.py` | 30 | Zgodność dokumentacji z implementacją |
-| Integracyjna | `tests/test_walidacja_typow.py` | 69 | Typy danych wejściowych, błędy w JSON |
+| Integracyjna | `tests/test_openapi.py` | 32 | Zgodność dokumentacji z implementacją |
+| Integracyjna | `tests/test_walidacja_typow.py` | 80 | Typy danych wejściowych, błędy w JSON, liczby spoza zakresu bazy |
 | Integracyjna | `tests/test_wdrozenie.py` | 20 | HTTPS, HSTS, proxy, siła klucza |
 | Integracyjna | `tests/test_wydajnosc.py` | 50 | Stronicowanie, indeksy, kompresja, cache, health |
-| E2E | `demo.py` | 25 | Pełny przepływ przez HTTP |
+| E2E | `demo.py` | 31 | Pełny przepływ przez HTTP |
 
 **Uwaga o kształcie piramidy.** Warstwa integracyjna jest tu liczniejsza niż
 jednostkowa — odwrotnie niż w podręcznikowym modelu. Jest to świadomy wybór:
@@ -318,6 +319,9 @@ wrócić. W kodzie testów opatrzono je komentarzem wyjaśniającym przyczynę.
 | Nagłówek `X-User-Id` pozwalał podszyć się pod dowolnego użytkownika | `test_api_auth.py::test_niepoprawny_naglowek_autoryzacji_daje_401` |
 | Hasła przechowywane otwartym tekstem | `test_api_auth.py::test_haslo_jest_hashowane_w_bazie` |
 | Dokumentacja opisywała `X-User-Id` długo po przejściu na JWT | `test_openapi.py` — cały zestaw testów zgodności |
+| Identyfikator większy niż 2⁶³ (w ścieżce lub `assigned_to`) kończył się błędem 500 — znalezione stress testem | `test_walidacja_typow.py::test_ogromny_identyfikator_w_sciezce_nie_powoduje_bledu_serwera`, `test_przypisanie_poza_zakresem_identyfikatorow_daje_400` |
+| Średnio 45 minut pokazywane jako 0,7 h (błąd zmiennoprzecinkowy `julianday()` i zaokrąglenie bankowe) | `test_kierownik.py::test_statystyki_zespolu`, `test_raporty_reguly.py::test_zaokraglenie_polowek_w_gore` |
+| Migracja roli przerywała start aplikacji, gdy w bazie były wcześniejsze osierocone odwołania | `test_kierownik.py::test_wczesniejsze_uszkodzenie_bazy_nie_blokuje_migracji` |
 
 ---
 

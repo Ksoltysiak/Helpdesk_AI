@@ -102,6 +102,14 @@ def test_trend_ignoruje_dni_spoza_okresu():
 # Liczby pomocnicze
 # ---------------------------------------------------------------
 
+@pytest.mark.parametrize("wartosc,oczekiwane", [
+    (0.25, 0.3), (0.75, 0.8), (2.45, 2.5), (66.66666, 66.7), (0.04, 0.0), (None, None),
+])
+def test_zaokraglenie_polowek_w_gore(wartosc, oczekiwane):
+    """Wbudowane round() dalo by 0,2 i 2,4 — zaokraglenie bankowe."""
+    assert r.zaokraglij(wartosc) == oczekiwane
+
+
 def test_zmiana_procentowa():
     assert r.zmiana_proc(15, 10) == 50.0
     assert r.zmiana_proc(5, 10) == -50.0

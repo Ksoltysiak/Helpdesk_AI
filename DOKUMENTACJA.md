@@ -16,9 +16,11 @@ priorytetu zgłoszenia
 - Dla każdej firmy-klienta system tworzy **raport z wykresami**: co psuje się
   najczęściej, jak szybko i czy w terminie rozwiązywano zgłoszenia, wraz
   z rekomendacjami.
+- **Kierownik** przydziela pracę technikom, widzi kolejkę zgłoszeń bez opiekuna
+  i zagrożonych terminem oraz tworzy raporty pracy zespołu.
 - Ocena zgłoszeń: **94,4% trafności** na zbiorze kontrolnym, **5 z 5**
   incydentów bezpieczeństwa rozpoznanych jako krytyczne.
-- Jakość: **543 testy automatyczne**, 100% pokrycia kodu, cały system
+- Jakość: **629 testów automatycznych**, 100% pokrycia kodu, cały system
   uruchamiany jednym poleceniem (Docker).
 
 ## Spis treści
@@ -79,8 +81,8 @@ temu można później przygotować zestawienie dla konkretnego klienta.
 | Rola | Co może |
 |------|---------|
 | **Pracownik** (firmy-klienta) | Zakłada zgłoszenia; widzi **wyłącznie własne** zgłoszenia i komentarze oznaczone jako jawne |
-| **Technik** (helpdesk) | Widzi i filtruje wszystkie zgłoszenia, także według klienta; przegląda listę klientów i tworzy dla nich raporty; zmienia status, kategorię i przypisanie; dodaje komentarze (wewnętrzne lub jawne); przegląda historię zmian |
-| **Administrator** | Uprawnienia technika |
+| **Technik** (helpdesk) | Widzi i filtruje wszystkie zgłoszenia, także według klienta; bierze wolne zgłoszenia; zmienia status i kategorię; dodaje komentarze (wewnętrzne lub jawne); przegląda historię zmian; tworzy raporty dla **obsługiwanych** firm; widzi własne statystyki |
+| **Kierownik** (helpdesk) | Wszystko, co technik, oraz: przydziela i przenosi zgłoszenia, widzi kolejkę zgłoszeń bez opiekuna i zagrożonych terminem, tworzy raporty dowolnej firmy oraz raporty zespołu i poszczególnych techników, ustala czasy SLA |
 
 ### Raporty dla klientów
 
@@ -99,6 +101,19 @@ Raport można wydrukować lub zapisać jako PDF. Każda liczba ma ścisłą
 definicję (np. zgłoszenie otwarte ponownie liczy się od drugiego
 rozwiązania), a poprawność obliczeń sprawdzają testy na ręcznie policzonych
 danych.
+
+### Kierownik zespołu
+
+| Funkcja | Co daje |
+|---|---|
+| Raport zespołu | Dla każdego technika: obciążenie, czas reakcji, liczba i czas rozwiązań, odsetek w terminie SLA, notatki — z porównaniem do poprzedniego okresu; kliknięcie technika otwiera jego raport |
+| Kolejka na pulpicie | Zgłoszenia bez opiekuna i zgłoszenia, którym kończy się termin SLA — od najpilniejszego |
+| Przydział pracy | Kierownik przydziela i przenosi zgłoszenia; technik może tylko wziąć wolne zgłoszenie dla siebie |
+| Czasy SLA | Zmiana liczby godzin dla priorytetów, z historią zmian; dotyczy tylko nowych zgłoszeń |
+
+Statystyki opisują obciążenie i tempo pracy, a nie tworzą rankingu —
+technicy są wymienieni alfabetycznie, a każdy technik widzi wyłącznie
+własne liczby.
 
 ### Cykl życia zgłoszenia
 
@@ -228,8 +243,8 @@ Pełny audyt (20 punktów kontrolnych): [`SECURITY.md`](SECURITY.md).
 
 | Rodzaj testów | Liczba | Co sprawdzają |
 |---------------|--------|---------------|
-| Jednostkowe i integracyjne | 518 | Moduł AI, cykl życia, API, uprawnienia, klientów, raporty, walidację danych |
-| Kompletny przepływ (E2E) | 25 | Działający serwer — od logowania do zamknięcia zgłoszenia i raportu |
+| Jednostkowe i integracyjne | 598 | Moduł AI, cykl życia, API, uprawnienia, klientów, raporty, rolę kierownika, migracje, walidację danych |
+| Kompletny przepływ (E2E) | 31 | Działający serwer — od logowania do zamknięcia zgłoszenia, raportu i statystyk zespołu |
 
 - **Pokrycie kodu: 100%.**
 - Skuteczność samych testów potwierdzono **testowaniem mutacyjnym** — celowo
@@ -264,7 +279,7 @@ Konta demonstracyjne:
 |-------|-------|------|
 | `k.nowak` | `haslo123` | pracownik (Piekarnia Złoty Kłos) |
 | `m.lewandowski` | `tech123` | technik |
-| `admin` | `admin123` | administrator |
+| `t.adamski` | `kierownik123` | kierownik |
 
 Dane demonstracyjne zawierają 5 fikcyjnych firm; pełna lista kont:
 [`README.md`](README.md#dane-testowe-logowanie).
@@ -285,7 +300,8 @@ Testy: `py -m pytest`. Konfiguracja i rozwiązywanie problemów:
 | Wydajność | Lista zgłoszeń 51× szybsza, odpowiedź 399× mniejsza |
 | Bezpieczeństwo | Audyt 20-punktowy; usunięto m.in. możliwość podszycia się i 15 podatności |
 | Raporty | Raport klienta w 5–20 ms przy 100 000 zgłoszeń; 0 błędów w testach losowych i równoległych |
-| Jakość | 543 testy automatyczne, 100% pokrycia kodu |
+| Rola kierownika | Statystyki zespołu za 30 dni w ok. 35 ms przy 100 000 zgłoszeń; 400 równoczesnych prób przejęcia 40 zgłoszeń — każde ma dokładnie jednego opiekuna |
+| Jakość | 629 testów automatycznych, 100% pokrycia kodu |
 | Wdrożenie | Cały system uruchamiany jednym poleceniem, sprawdzany w CI |
 
 ### Ograniczenia
@@ -301,13 +317,15 @@ Testy: `py -m pytest`. Konfiguracja i rozwiązywanie problemów:
 
 ### Dalszy rozwój
 
-1. Rola kierownika zespołu — nadzór nad technikami i ustawienia (np. czasy
-   SLA), z dostępem do raportów.
-2. Powiadomienia (e-mail, komunikator) o zbliżającym się i przekroczonym
+1. Zarządzanie kontami i firmami przez kierownika (dziś przez `seed.py`),
+   z dezaktywacją konta zamiast usuwania.
+2. Korekta priorytetu przez kierownika z przeliczeniem terminu SLA oraz
+   eskalacja zgłoszenia przez technika.
+3. Powiadomienia (e-mail, komunikator) o zbliżającym się i przekroczonym
    terminie SLA oraz comiesięczna wysyłka raportu do klienta.
-3. Ocena zgłoszeń z pomocą modelu językowego, z powrotem do obecnego modułu
+4. Ocena zgłoszeń z pomocą modelu językowego, z powrotem do obecnego modułu
    w razie awarii usługi.
-4. Przejście na PostgreSQL przy większej skali.
+5. Przejście na PostgreSQL przy większej skali.
 
 ---
 
